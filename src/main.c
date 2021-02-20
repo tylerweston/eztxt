@@ -8,6 +8,7 @@
 /*
 todo: 
 - start refactoring now
+- make left and right keys skip forwards and backwards lines
 - delete/backspace become same function
 - simple menu including saving files
 - longer files and scrolling 
@@ -18,6 +19,11 @@ todo:
   the linked list!)
 - start writing unit tests using check!
 - handle tabs properly
+- store coloring information in a parallel array
+  so we only calculate it when a line changes?
+- should quotes carry over lines? probably not
+- since this is only for cheesy little assembly progs?
+- remove the silly scrolling bar, it's distracting and useless
 */
 
 #define LINE_LENGTH 80
@@ -47,6 +53,12 @@ void do_menu();
 
 char* current_filename = NULL;
 
+// make our colors DEFINEs in this bigger scope?
+#define QUOTE_PAIR 2
+#define BAR_PAIR 3
+
+
+
 int main(int argc, char** argv)
 {
 	const char* const banner = "--- eztxt - 2020 - Tyler Weston --- a simple text editor written in c using ncurses --- ";
@@ -54,12 +66,14 @@ int main(int argc, char** argv)
 	int bannerindex = 0;
 	initscr();
 	int cur_col = 1;
+
 	if (has_colors())
 	{
 		use_default_colors();
 		start_color();
-		init_pair(cur_col, -1, COLOR_BLACK);
-		//init_pair(2, -1, COLOR_BLUE);
+		init_pair(cur_col, COLOR_RED, COLOR_BLACK);
+		init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
+		init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
 	}
 	else
 	{
@@ -68,7 +82,6 @@ int main(int argc, char** argv)
 		getch();
 		goto cleanup_and_end;
 	}
-	//bkgd(COLOR_PAIR(2));
 
 	printw("eztxt - Tyler Weston - F12 exits - curses version: %s", curses_version());
 	cbreak();
@@ -149,37 +162,42 @@ int main(int argc, char** argv)
 		case '\n':	// ENTER key, KEY_ENTER doesn't work?
 		;
 			docline* newline = malloc(sizeof(docline));
-			if (xpos == 0)
+			// TODO: Handle special case where we are at first character
+			// of the line, then we can just insert a new blank line before this
+			// one and not worry about the copy we're doing below.
+			// if (xpos == 0)
+			// {
+			// 	// insert before
+			// 	newline->prevline = currline->prevline;
+			// 	newline->nextline = currline;
+			// 	currline->prevline = newline;
+			// 	if (head == currline)
+			// 		head = newline;
+			// 	currline = newline;
+			// }
+			// else
+			
+			// here, we'll take the rest of the chars to the
+			// next line
+			// insert after
+			int nindex = 0;
+			for (int i = xpos; i < strlen(currline->line); ++i)
 			{
-				// insert before
-				newline->prevline = currline->prevline;
-				newline->nextline = currline;
-				currline->prevline = newline;
-				if (head == currline)
-					head = newline;
-				currline = newline;
+				newline->line[nindex] = currline->line[i];
+				nindex++;
 			}
-			else
+			newline->line[nindex] = '\0';
+			for (int i = strlen(currline->line); i >= xpos ; --i)
 			{
-				// here, we'll take the rest of the chars to the
-				// next line
-				// insert after
-				int nindex = 0;
-				for (int i = xpos; i < strlen(currline->line); ++i)
-				{
-					newline->line[nindex] = currline->line[i];
-					nindex++;
-				}
-				newline->line[nindex] = '\0';
-				currline->line[xpos] = '\0';
-				newline->prevline = currline;
-				newline->nextline = currline->nextline;
-				currline->nextline = newline;
-
-				if (tail == currline)
-					tail = newline;
-				currline = newline;
+				currline->line[i] = '\0';
 			}
+			newline->prevline = currline;
+			newline->nextline = currline->nextline;
+			currline->nextline = newline;
+			if (tail == currline)
+				tail = newline;
+			currline = newline;
+			
 			xpos = 0;
 			++ypos;
 			break;
@@ -230,6 +248,7 @@ int main(int argc, char** argv)
 					{
 						// error check this
 						currline->prevline->line[lineindex++] = currline->line[i];
+						if (lineindex >= 80) lineindex = 80;
 					}
 					docline* tmp = currline->prevline;
 					remove_line(currline, &head, &tail);
@@ -263,10 +282,6 @@ int main(int argc, char** argv)
 				{
 					tmp = currline->prevline;
 					--ypos;
-				}
-				else if (currline == head && currline->nextline == NULL)
-				{
-					// is this the problematic case?
 				}
 				else
 				{
@@ -332,7 +347,10 @@ int main(int argc, char** argv)
 			mvprintw(0 , 0, "%d, %d", xpos, ypos);
 			mvprintw(0, width - 6, "%02d, %02d", height, width);
 			if (current_filename)
-				mvprintw(0, (width - strlen(current_filename)) / 2, current_filename);
+				mvprintw(0, (width - strlen(current_filename) + 6) / 2, "eztxt - %s", current_filename);
+			else
+				mvprintw(0, (width - 5) / 2, "eztxt");
+			mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 			mvprintw(height - 1, (width/2)-HALF_BANNER_WIDTH, "%s", curbanner);
 		
 		}
@@ -365,13 +383,46 @@ void draw_lines(docline* top, int max_lines, bool clean)
 	int yline = 1;
 	// super cheap just to clear entire screen?
 	clear();
+	// TODO: Figure out how scrolling for long documents is going to happen here
+	// just to test out quote highlights
+	bool in_quotes = false;
+	bool used_quote_color = false;
+	char ch;
 	do 
 	{
+		// TODO: read parallel color data here and do syntax highlighting if necessary
+		// that will mean probably going char by char instead of line by line!
 		move(yline, 0);
-		mvprintw(yline, 0, "%s", cur->line);
+		// mvprintw(yline, 0, "%s", cur->line);
+		bool endflag = false;
+
+		for (int x = 0; x < strlen(cur->line); ++x)
+		{
+			ch = cur->line[x];
+			if (ch == '\"' && in_quotes)
+			{
+				endflag = true;
+				in_quotes = false;
+			} 
+			else if (ch == '\"' && !in_quotes)
+			{
+				attron(COLOR_PAIR(QUOTE_PAIR));
+				used_quote_color = true;
+				in_quotes = true;
+			}
+			mvprintw(yline, x, "%c", ch);
+			if (endflag)
+			{
+				attroff(COLOR_PAIR(QUOTE_PAIR));
+				endflag = false;
+			}
+		}
 		yline++;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
+	// failsafe for now
+	if (used_quote_color)
+		attroff(COLOR_PAIR(QUOTE_PAIR));
 	refresh();
 }
 
@@ -380,7 +431,13 @@ void load_doc(const char* filename, docline** head, docline** tail)
 	FILE *fptr = fopen(filename, "r");
 	if (fptr == NULL)
 	{
-		printw("Cannot open %s", filename);
+		// should we have some sort of better error-handling?
+		// or just kick out on error?
+		printw("\nCannot open %s\n", filename);
+		printw("Press any key...\n");
+		nodelay(stdscr, false);
+		getch();
+		endwin();
 		exit(EXIT_FAILURE);
 	}
 	if (current_filename)
