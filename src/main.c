@@ -1,22 +1,23 @@
-#include <curses.h>
+#include <curses.h>	// include stdio
 #include <stdlib.h>
 #include <wchar.h>
 #include <string.h>
 #include <time.h>
 
+
 /*
 todo: 
 - start refactoring now
 - delete/backspace become same function
-- simple menu including saving/loading files
+- simple menu including saving files
 - longer files and scrolling 
 - header
 - pressing CTRL or ALT breaks things
-- add commands for jumping between words?
 - add cutline + paste line (or lines?) option
  (this will just be moving things around in
   the linked list!)
 - start writing unit tests using check!
+- handle tabs properly
 */
 
 #define LINE_LENGTH 80
@@ -39,6 +40,12 @@ typedef struct docline
 
 void draw_lines(docline*, int, bool);
 void remove_line(docline* line, docline** head, docline** tail);
+void clear_doc(docline* head);
+void load_doc(const char*, docline** head, docline** tail);
+void save_doc(docline* head);
+void do_menu();
+
+char* current_filename = NULL;
 
 int main(int argc, char** argv)
 {
@@ -54,6 +61,13 @@ int main(int argc, char** argv)
 		init_pair(cur_col, -1, COLOR_BLACK);
 		//init_pair(2, -1, COLOR_BLUE);
 	}
+	else
+	{
+		printw("No color terminal found, exiting.");
+		printw("Press a key to exit...");
+		getch();
+		goto cleanup_and_end;
+	}
 	//bkgd(COLOR_PAIR(2));
 
 	printw("eztxt - Tyler Weston - F12 exits - curses version: %s", curses_version());
@@ -66,15 +80,18 @@ int main(int argc, char** argv)
 	refresh();
 	wchar_t ch;
 	bool exitFlag = false;
+	bool menuFlag = false;
 	int xpos = 0, ypos = 0;
 	int scrolltick = 0;
 	int width, height;
+	int linelen;
 	getmaxyx(stdscr, height, width);
 
 	// int topline = 0;
 	// bool screenScrolled = false;
 	// int changedLines = 0;
-	bool screenClean = true;
+	bool screen_clean = true;
+	bool unsaved_changes;
 
 	docline* firstline = malloc(sizeof(docline));
 	firstline->prevline = NULL;
@@ -88,20 +105,41 @@ int main(int argc, char** argv)
 
 	clock_t now = clock();
 
+	if (argc != 1)
+	{
+		clear_doc(head);
+		load_doc(argv[1], &head, &tail);
+		currline = head;
+	}
+
+
 	while(!exitFlag)
 	{
 
-		screenClean = false;
+		screen_clean = false;
 		ch = getch();
 
 		switch (ch)
 		{
-		case ERR:
-			screenClean = true;
+
+		case CTRL('s'):
+			save_doc(head);
 			break;
-			// SLEFT, SRIGHT for shift left, shift right
-		case CTRL(KEY_LEFT):
-			mvprintw(0, 45, "pressed CTRL left");
+
+		case ERR:
+			screen_clean = true;
+			break;
+
+		case KEY_SLEFT:
+			while (xpos-- >=0 && currline->line[xpos] == ' ');
+			while (xpos-- >=0 && currline->line[xpos] != ' ');
+			break;
+
+		case KEY_SRIGHT:
+			//mvprintw(0, 45, "pressed SHIFT right");
+			linelen = strlen(currline->line);
+			while (xpos++ <= linelen && currline->line[xpos] == ' ');
+			while (xpos++ <= linelen && currline->line[xpos] != ' ');
 			break;
 
 		case KEY_RESIZE:
@@ -126,6 +164,14 @@ int main(int argc, char** argv)
 				// here, we'll take the rest of the chars to the
 				// next line
 				// insert after
+				int nindex = 0;
+				for (int i = xpos; i < strlen(currline->line); ++i)
+				{
+					newline->line[nindex] = currline->line[i];
+					nindex++;
+				}
+				newline->line[nindex] = '\0';
+				currline->line[xpos] = '\0';
 				newline->prevline = currline;
 				newline->nextline = currline->nextline;
 				currline->nextline = newline;
@@ -168,12 +214,28 @@ int main(int argc, char** argv)
 			exitFlag = true;
 			break;
 
+		case KEY_F(2):
+			menuFlag = true;
+			break;
+
 		case KEY_BACKSPACE:
 			if (xpos == 0)
 			{
 				// bring the line onto the one above
 				if (currline->prevline != NULL)
 				{
+					int lineindex = strlen(currline->prevline->line);
+					int newxpos = lineindex;
+					for (int i = 0; i < strlen(currline->line); ++i)
+					{
+						// error check this
+						currline->prevline->line[lineindex++] = currline->line[i];
+					}
+					docline* tmp = currline->prevline;
+					remove_line(currline, &head, &tail);
+					currline = tmp;
+					ypos--;
+					xpos = newxpos;
 
 				}
 				// otherwise, we're the first line
@@ -191,6 +253,11 @@ int main(int argc, char** argv)
 		case KEY_DC:
 			if (xpos == 0 && currline->line[0] == '\0')
 			{
+				if (currline == head && currline->nextline == NULL)
+				{
+					// empty document, nothing to do here
+					break;
+				}
 				docline* tmp;
 				if (currline == tail)
 				{
@@ -239,6 +306,11 @@ int main(int argc, char** argv)
 		if (ypos <= 0)
 			ypos = 0;
 
+		if (menuFlag)
+		{
+			do_menu();
+		}
+
 		if (clock() - now > 10000)
 		{
 			scrolltick++;
@@ -254,16 +326,19 @@ int main(int argc, char** argv)
 				curbanner[i] = banner[(bannerindex + i) % strlen(banner)];
 			}
 			curbanner[BANNER_WIDTH] = '\0';
-			draw_lines(head, 20, screenClean);
+			draw_lines(head, 20, screen_clean);
 			mvchgat(ypos + 1, xpos, 1, A_BLINK, COLOR_PAIR(cur_col), NULL);
 
 			mvprintw(0 , 0, "%d, %d", xpos, ypos);
 			mvprintw(0, width - 6, "%02d, %02d", height, width);
-			mvprintw(0, (width/2)-HALF_BANNER_WIDTH, "%s", curbanner);
+			if (current_filename)
+				mvprintw(0, (width - strlen(current_filename)) / 2, current_filename);
+			mvprintw(height - 1, (width/2)-HALF_BANNER_WIDTH, "%s", curbanner);
+		
 		}
 
 	}
-
+cleanup_and_end:
 	endwin();
 	exit(EXIT_SUCCESS);
 }
@@ -298,4 +373,76 @@ void draw_lines(docline* top, int max_lines, bool clean)
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
 	refresh();
+}
+
+void load_doc(const char* filename, docline** head, docline** tail)
+{
+	FILE *fptr = fopen(filename, "r");
+	if (fptr == NULL)
+	{
+		printw("Cannot open %s", filename);
+		exit(EXIT_FAILURE);
+	}
+	if (current_filename)
+		free(current_filename);
+	current_filename = strdup(filename);
+	printw("Opening file %s", filename);
+	refresh();
+	docline* lastline = NULL;
+	char ch;
+	int linelen = 0;
+	docline* currline = malloc(sizeof(docline));
+	*head = currline;
+	for(;;)
+	{
+		ch = fgetc(fptr);
+		printw("%c", ch);
+		refresh();
+		if (feof(fptr))
+		{
+			// end of document
+			*tail = currline;
+			break;
+		}
+		else if (ch == '\n' || linelen >= 79)
+		{
+			// create a newline
+			linelen = 0;
+			lastline = currline;
+			currline = malloc(sizeof(docline));
+			currline->prevline = lastline;
+			lastline->nextline = currline;
+		}
+		else
+		{
+			currline->line[linelen] = ch;
+			++linelen;
+		}
+	}
+	fclose(fptr);
+	return;
+}
+
+void clear_doc(docline* head)
+{
+	// free all memoy used by a document
+	docline* tmp;
+	while (head != NULL)
+	{
+		tmp = head->nextline;
+		free(head);
+		head = tmp;
+	}
+}
+
+void save_doc(docline* head)
+{
+	printw("SAVING DOC...");
+	getch();
+}
+
+void do_menu()
+{
+	printw("MENU...");
+	getch();
 }
