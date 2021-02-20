@@ -1,20 +1,33 @@
-#include <curses.h>	// include stdio
-#include <stdlib.h>
-#include <wchar.h>
-#include <string.h>
-#include <time.h>
-
+#include "headers/main.h"
 #include "headers/util.h"
+#include "headers/fileio.h"
+#include "headers/parse.h"
 
+/*
+*TODO:*
+- lots of bug fixes
+- unit tests
+- handle tabs
+- saving
+- mips keyword syntax highlighting
+- cutting and pasting lines
+- scrolling long programs
+- check return value of load_doc for errors
+
+*MAYBE TODO:*
+- undo/redo functions?
+- increase line limit from 80
+- look into using gap buffers to make editing text more efficient
+- regex/word search in document
+*/
 
 /*
 todo: 
+- why is there a 4 in the top corner is using xterm?
 - start refactoring now
-- make left and right keys skip forwards and backwards lines
 - delete/backspace become same function
 - simple menu including saving files
 - longer files and scrolling 
-- header
 - pressing CTRL or ALT breaks things
 - add cutline + paste line (or lines?) option
  (this will just be moving things around in
@@ -28,42 +41,6 @@ todo:
 - remove the silly scrolling bar, it's distracting and useless
 */
 
-#define LINE_LENGTH 80
-#define BANNER_WIDTH 20
-#define HALF_BANNER_WIDTH (BANNER_WIDTH / 2)
-#define CTRL(x) ((x) & 0x1f)
-
-#define min(a,b) \
-	({ __typeof__ (a) _a = (a); \
-	__typeof__ (b) _b = (b); \
-	_a < _b ? _a : _b; })
-
-typedef struct docline 
-{
-	char line[LINE_LENGTH];
-	char formatting[LINE_LENGTH];	// use this to store color
-	struct docline* prevline;
-	struct docline* nextline;
-} docline;
-
-void draw_lines(docline*, int, bool);
-void remove_line(docline* line, docline** head, docline** tail);
-void clear_doc(docline* head);
-void load_doc(const char*, docline** head, docline** tail);
-void save_doc(docline* head);
-void do_menu();
-void parse_line(docline* line);
-
-char* current_filename = NULL;
-
-// make our colors DEFINEs in this bigger scope?
-// use an enum for this?
-#define QUOTE_PAIR 2
-#define BAR_PAIR 3
-#define COMMENT_PAIR 4
-#define PUNC_PAIR 5
-#define REG_PAIR 6
-#define SECTION_PAIR 7
 
 /*
 COLOR_BLACK
@@ -76,35 +53,36 @@ COLOR_CYAN
 COLOR_WHITE
 */
 
+char* current_filename = NULL;
+
 int main(int argc, char** argv)
 {
-	const char* const banner = "--- eztxt - 2020 - Tyler Weston --- a simple text editor written in c using ncurses --- ";
-	char curbanner[BANNER_WIDTH];
-	int bannerindex = 0;
 	initscr();
 	int cur_col = 1;
 
-	if (has_colors())
-	{
-		use_default_colors();
-		start_color();
-		init_pair(cur_col, COLOR_RED, COLOR_BLACK);
-		init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
-		init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
-		init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
-		init_pair(PUNC_PAIR, COLOR_BLUE, -1);
-		init_pair(REG_PAIR, COLOR_YELLOW, -1);
-		init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
-	}
-	else
+	if (!has_colors())
 	{
 		printw("No color terminal found, exiting.");
 		printw("Press a key to exit...");
 		getch();
-		goto cleanup_and_end;
+		goto cleanup_and_end;	
 	}
 
-	printw("eztxt - Tyler Weston - F12 exits - curses version: %s", curses_version());
+	use_default_colors();
+	start_color();
+
+	init_pair(cur_col, COLOR_RED, COLOR_BLACK);
+	init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
+	init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
+	init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
+	init_pair(PUNC_PAIR, COLOR_BLUE, -1);
+	init_pair(REG_PAIR, COLOR_YELLOW, -1);
+	init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
+	init_pair(KEYWORD_PAIR, COLOR_WHITE, -1);
+
+	mvprintw(0, 0, "eztxt %d.%d - Tyler Weston - F12 exits - %s", 
+		MAJOR_VERSION, MINOR_VERSION, curses_version());
+	mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 	cbreak();
 	noecho();
 	nodelay(stdscr, TRUE);
@@ -118,6 +96,7 @@ int main(int argc, char** argv)
 	bool menuFlag = false;
 	int xpos = 0, ypos = 0;
 	int scrolltick = 0;
+	bool had_input = false, clear_once = true;
 	int width, height;
 	int linelen;
 	getmaxyx(stdscr, height, width);
@@ -145,24 +124,29 @@ int main(int argc, char** argv)
 		clear_doc(head);
 		load_doc(argv[1], &head, &tail);
 		currline = head;
+		draw_lines(head, height - 1, screen_clean);
 	}
 
-
+	mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(cur_col), NULL);
 	while(!exitFlag)
 	{
 
-		screen_clean = false;
+		screen_clean = true;
 		ch = getch();
+		if (ch!=ERR) {
+			had_input = true;
+			screen_clean = false;
+		} 
 
 		switch (ch)
 		{
 
-		case CTRL('s'):
-			save_doc(head);
-			break;
+		// case CTRL('s'):	// this doesn' work, actually freezes
+		// 	goto cleanup_and_end;
+		// 	save_doc(head);
+		// 	break;
 
 		case ERR:
-			screen_clean = true;
 			break;
 
 		case KEY_SLEFT:
@@ -178,6 +162,7 @@ int main(int argc, char** argv)
 			break;
 
 		case KEY_RESIZE:
+			clear_once = true;
 			getmaxyx(stdscr, height, width);
 			break;
 
@@ -254,7 +239,7 @@ int main(int argc, char** argv)
 
 		case KEY_RIGHT:
 			xpos++;
-			if (xpos > strlen(currline->line) && currline->nextline)
+			if ((size_t)xpos > strlen(currline->line) && currline->nextline)
 			{
 				currline = currline->nextline;
 				ypos++;
@@ -360,35 +345,33 @@ int main(int argc, char** argv)
 			do_menu();
 		}
 
-		// screen update
-		if (clock() - now > 10000)
+		if (!screen_clean)
 		{
-			scrolltick++;
-			now = clock();
-			if (scrolltick >= 10)
-			{
-				scrolltick = 0;
-				++bannerindex;
-				avg_cpu_mhz = cpu_info();
-			}
-			bannerindex %= strlen(banner);
-			for (int i = 0; i < BANNER_WIDTH; ++i)
-			{
-				curbanner[i] = banner[(bannerindex + i) % strlen(banner)];
-			}
-			curbanner[BANNER_WIDTH] = '\0';
+			clear();
 			draw_lines(head, height - 1, screen_clean);
-			mvchgat(ypos + 1, xpos, 1, A_BLINK, COLOR_PAIR(cur_col), NULL);
+			mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(cur_col), NULL);
 
-			mvprintw(0 , 0, "%d, %d", xpos, ypos);
-			mvprintw(0, width - 6, "%02d, %02d", height, width);
-			if (current_filename)
-				mvprintw(0, (width - strlen(current_filename) + 6) / 2, "eztxt - %s", current_filename);
-			else
-				mvprintw(0, (width - 5) / 2, "eztxt");
-			mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
-			mvprintw(height - 1, (width/2)-HALF_BANNER_WIDTH, "%s", curbanner);
-			mvprintw(height - 1, 0, "cpu: %.2fMHz", avg_cpu_mhz);
+			if (had_input)
+			{
+				mvprintw(0 , 0, "%d, %d  ", xpos, ypos);
+				mvprintw(0, width - 6, "%02d, %02d", height, width);
+				
+				if (current_filename)
+					mvprintw(0, (width - strlen(current_filename) + 6) / 2, "eztxt - %s", current_filename);
+				else
+					mvprintw(0, (width - 5) / 2, "eztxt");
+				mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
+			}
+		}
+
+		mvprintw(height - 1, 0, "cpu: %.2fMHz", avg_cpu_mhz);
+
+		// screen update
+		if (clock() - now > 500000)
+		{
+			now = clock();
+			avg_cpu_mhz = cpu_info();
+			scrolltick = 0;
 		}
 
 	}
@@ -397,72 +380,6 @@ cleanup_and_end:
 	exit(EXIT_SUCCESS);
 }
 
-void parse_line(docline* line)
-{
-	char ch;
-	bool in_quotes = false;
-	bool in_comment = false;
-	bool in_register = false;
-	bool in_section = false;
-	for (int i = 0; i < strlen(line->line); ++i)
-	{
-		line->formatting[i] = 0;	// line formatting 1 = error
-		ch = line->line[i];
-		// comments take precedence
-		if (ch == '#')
-		{
-			in_comment = true;
-		}
-		if (in_comment)
-		{
-			line->formatting[i] = COMMENT_PAIR;
-			continue;
-		}
-
-		// this area is quoted
-		if (ch == '\"' && !in_quotes)
-		{
-			in_quotes = true;
-		}
-		else if (ch == '\"' && in_quotes)
-		{
-			line->formatting[i] = QUOTE_PAIR;
-			in_quotes = false;
-		}
-
-		if (in_quotes)
-		{
-			line->formatting[i] = QUOTE_PAIR;
-			continue;
-		}
-
-		if (ch == '.')
-			in_section = true;
-
-		if (in_section)
-			line->formatting[i] = SECTION_PAIR;
-
-		if (ch == '$')
-			in_register = true;
-
-		if (in_register)
-			line->formatting[i] = REG_PAIR;
-
-		if (ch == ' ')
-		{
-			line->formatting[i] = 0;
-			in_register = false;
-			in_section = false;
-		}
-
-		if (ch == ',')
-		{
-			line->formatting[i] = PUNC_PAIR;
-			in_register = false;
-			in_section = false;
-		}
-	}
-}
 
 void remove_line(docline* line, docline** head, docline** tail)
 {
@@ -485,22 +402,15 @@ void draw_lines(docline* top, int max_lines, bool clean)
 	docline* cur = top;
 	int yline = 1;
 	// super cheap just to clear entire screen?
-	clear();
+	// clear();
 	// TODO: Figure out how scrolling for long documents is going to happen here
 	// just to test out quote highlights
-	bool in_quotes = false;
-	bool used_quote_color = false;
 	char ch;
 	do 
 	{
-		// TODO: read parallel color data here and do syntax highlighting if necessary
-		// that will mean probably going char by char instead of line by line!
 		move(yline, 0);
-		// mvprintw(yline, 0, "%s", cur->line);
-		bool endflag = false;
+		clrtoeol();
 		int clrval = 0;
-		// int clrcolor = 0;
-		// int clrattr = 0 ;
 		parse_line(cur);
 		bool first = true;
 		for (int x = 0; x < strlen(cur->line); ++x)
@@ -508,93 +418,20 @@ void draw_lines(docline* top, int max_lines, bool clean)
 			ch = cur->line[x];
 			if (!first)
 			{
-				// attroff(COLOR_PAIR(clrcolor));
-				// attroff(clrattr);
-				// attroff(clrval);
-				attroff(COLOR_PAIR(clrval));
+				attroff(clrval);
 			}
 			first = false;
 			clrval = cur->formatting[x];
-			attron(COLOR_PAIR(clrval));
-			// clrcolor = clrval & 0x0F;
-			// clrattr = (clrval & 0xF0) >> 4;
-			// attron(COLOR_PAIR(clrcolor));
-			// attron(clrattr);
+			attron(clrval);
 			mvprintw(yline, x, "%c", ch);
 		}
-		attroff(COLOR_PAIR(clrval));
-		// attroff(COLOR_PAIR(clrattr));
+		attroff(clrval);
 		yline++;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
-	// failsafe for now
-	if (used_quote_color)
-		attroff(COLOR_PAIR(QUOTE_PAIR));
 	refresh();
 }
 
-void load_doc(const char* filename, docline** head, docline** tail)
-{
-	FILE *fptr = fopen(filename, "r");
-	if (fptr == NULL)
-	{
-		// should we have some sort of better error-handling?
-		// or just kick out on error?
-		printw("\nCannot open %s\n", filename);
-		printw("Press any key...\n");
-		nodelay(stdscr, false);
-		getch();
-		endwin();
-		exit(EXIT_FAILURE);
-	}
-	if (current_filename)
-		free(current_filename);
-	current_filename = strdup(filename);
-	printw("Opening file %s", filename);
-	refresh();
-	docline* lastline = NULL;
-	char ch;
-	int linelen = 0;
-	docline* currline = calloc(1, sizeof(docline));
-	if (currline == NULL)
-	{
-		printw("\nOut of memory, calloc failed.\n");
-		printw("Press any key...");
-		nodelay(stdscr, false);
-		getch();
-		endwin();
-		exit(EXIT_FAILURE);
-	}
-	*head = currline;
-	for(;;)
-	{
-		ch = fgetc(fptr);
-		printw("%c", ch);
-		refresh();
-		if (feof(fptr))
-		{
-			// end of document
-			*tail = currline;
-			break;
-		}
-		else if (ch == '\n' || linelen >= 79)
-		{
-			// create a newline
-			linelen = 0;
-			lastline = currline;
-			currline = calloc(1, sizeof(docline));
-			currline->prevline = lastline;
-			lastline->nextline = currline;
-		}
-		else
-		{
-			currline->line[linelen] = ch;
-			++linelen;
-		}
-	}
-	fclose(fptr);
-	return;
-}
 
 void clear_doc(docline* head)
 {
@@ -608,11 +445,7 @@ void clear_doc(docline* head)
 	}
 }
 
-void save_doc(docline* head)
-{
-	printw("SAVING DOC...");
-	getch();
-}
+
 
 void do_menu()
 {
