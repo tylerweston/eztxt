@@ -4,6 +4,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "headers/util.h"
+
 
 /*
 todo: 
@@ -50,14 +52,29 @@ void clear_doc(docline* head);
 void load_doc(const char*, docline** head, docline** tail);
 void save_doc(docline* head);
 void do_menu();
+void parse_line(docline* line);
 
 char* current_filename = NULL;
 
 // make our colors DEFINEs in this bigger scope?
+// use an enum for this?
 #define QUOTE_PAIR 2
 #define BAR_PAIR 3
+#define COMMENT_PAIR 4
+#define PUNC_PAIR 5
+#define REG_PAIR 6
+#define SECTION_PAIR 7
 
-
+/*
+COLOR_BLACK
+COLOR_RED
+COLOR_GREEN
+COLOR_YELLOW
+COLOR_BLUE
+COLOR_MAGENTA
+COLOR_CYAN
+COLOR_WHITE
+*/
 
 int main(int argc, char** argv)
 {
@@ -74,6 +91,10 @@ int main(int argc, char** argv)
 		init_pair(cur_col, COLOR_RED, COLOR_BLACK);
 		init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
 		init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
+		init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
+		init_pair(PUNC_PAIR, COLOR_BLUE, -1);
+		init_pair(REG_PAIR, COLOR_YELLOW, -1);
+		init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
 	}
 	else
 	{
@@ -92,6 +113,7 @@ int main(int argc, char** argv)
 	curs_set(0);
 	refresh();
 	wchar_t ch;
+	double avg_cpu_mhz = 0.0;
 	bool exitFlag = false;
 	bool menuFlag = false;
 	int xpos = 0, ypos = 0;
@@ -106,7 +128,7 @@ int main(int argc, char** argv)
 	bool screen_clean = true;
 	bool unsaved_changes;
 
-	docline* firstline = malloc(sizeof(docline));
+	docline* firstline = calloc(1, sizeof(docline));
 	firstline->prevline = NULL;
 	firstline->nextline = NULL;
 
@@ -161,7 +183,7 @@ int main(int argc, char** argv)
 
 		case '\n':	// ENTER key, KEY_ENTER doesn't work?
 		;
-			docline* newline = malloc(sizeof(docline));
+			docline* newline = calloc(1, sizeof(docline));
 			// TODO: Handle special case where we are at first character
 			// of the line, then we can just insert a new blank line before this
 			// one and not worry about the copy we're doing below.
@@ -222,10 +244,22 @@ int main(int argc, char** argv)
 
 		case KEY_LEFT:
 			xpos--;
+			if (xpos == -1 && currline->prevline)
+			{
+				currline = currline->prevline;
+				ypos--;
+				xpos = strlen(currline->line);
+			}
 			break;
 
 		case KEY_RIGHT:
 			xpos++;
+			if (xpos > strlen(currline->line) && currline->nextline)
+			{
+				currline = currline->nextline;
+				ypos++;
+				xpos = 0;
+			}
 			break;
 
 		case KEY_F(12):
@@ -326,6 +360,7 @@ int main(int argc, char** argv)
 			do_menu();
 		}
 
+		// screen update
 		if (clock() - now > 10000)
 		{
 			scrolltick++;
@@ -334,6 +369,7 @@ int main(int argc, char** argv)
 			{
 				scrolltick = 0;
 				++bannerindex;
+				avg_cpu_mhz = cpu_info();
 			}
 			bannerindex %= strlen(banner);
 			for (int i = 0; i < BANNER_WIDTH; ++i)
@@ -341,7 +377,7 @@ int main(int argc, char** argv)
 				curbanner[i] = banner[(bannerindex + i) % strlen(banner)];
 			}
 			curbanner[BANNER_WIDTH] = '\0';
-			draw_lines(head, 20, screen_clean);
+			draw_lines(head, height - 1, screen_clean);
 			mvchgat(ypos + 1, xpos, 1, A_BLINK, COLOR_PAIR(cur_col), NULL);
 
 			mvprintw(0 , 0, "%d, %d", xpos, ypos);
@@ -352,13 +388,80 @@ int main(int argc, char** argv)
 				mvprintw(0, (width - 5) / 2, "eztxt");
 			mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 			mvprintw(height - 1, (width/2)-HALF_BANNER_WIDTH, "%s", curbanner);
-		
+			mvprintw(height - 1, 0, "cpu: %.2fMHz", avg_cpu_mhz);
 		}
 
 	}
 cleanup_and_end:
 	endwin();
 	exit(EXIT_SUCCESS);
+}
+
+void parse_line(docline* line)
+{
+	char ch;
+	bool in_quotes = false;
+	bool in_comment = false;
+	bool in_register = false;
+	bool in_section = false;
+	for (int i = 0; i < strlen(line->line); ++i)
+	{
+		line->formatting[i] = 0;	// line formatting 1 = error
+		ch = line->line[i];
+		// comments take precedence
+		if (ch == '#')
+		{
+			in_comment = true;
+		}
+		if (in_comment)
+		{
+			line->formatting[i] = COMMENT_PAIR;
+			continue;
+		}
+
+		// this area is quoted
+		if (ch == '\"' && !in_quotes)
+		{
+			in_quotes = true;
+		}
+		else if (ch == '\"' && in_quotes)
+		{
+			line->formatting[i] = QUOTE_PAIR;
+			in_quotes = false;
+		}
+
+		if (in_quotes)
+		{
+			line->formatting[i] = QUOTE_PAIR;
+			continue;
+		}
+
+		if (ch == '.')
+			in_section = true;
+
+		if (in_section)
+			line->formatting[i] = SECTION_PAIR;
+
+		if (ch == '$')
+			in_register = true;
+
+		if (in_register)
+			line->formatting[i] = REG_PAIR;
+
+		if (ch == ' ')
+		{
+			line->formatting[i] = 0;
+			in_register = false;
+			in_section = false;
+		}
+
+		if (ch == ',')
+		{
+			line->formatting[i] = PUNC_PAIR;
+			in_register = false;
+			in_section = false;
+		}
+	}
 }
 
 void remove_line(docline* line, docline** head, docline** tail)
@@ -395,28 +498,32 @@ void draw_lines(docline* top, int max_lines, bool clean)
 		move(yline, 0);
 		// mvprintw(yline, 0, "%s", cur->line);
 		bool endflag = false;
-
+		int clrval = 0;
+		// int clrcolor = 0;
+		// int clrattr = 0 ;
+		parse_line(cur);
+		bool first = true;
 		for (int x = 0; x < strlen(cur->line); ++x)
 		{
 			ch = cur->line[x];
-			if (ch == '\"' && in_quotes)
+			if (!first)
 			{
-				endflag = true;
-				in_quotes = false;
-			} 
-			else if (ch == '\"' && !in_quotes)
-			{
-				attron(COLOR_PAIR(QUOTE_PAIR));
-				used_quote_color = true;
-				in_quotes = true;
+				// attroff(COLOR_PAIR(clrcolor));
+				// attroff(clrattr);
+				// attroff(clrval);
+				attroff(COLOR_PAIR(clrval));
 			}
+			first = false;
+			clrval = cur->formatting[x];
+			attron(COLOR_PAIR(clrval));
+			// clrcolor = clrval & 0x0F;
+			// clrattr = (clrval & 0xF0) >> 4;
+			// attron(COLOR_PAIR(clrcolor));
+			// attron(clrattr);
 			mvprintw(yline, x, "%c", ch);
-			if (endflag)
-			{
-				attroff(COLOR_PAIR(QUOTE_PAIR));
-				endflag = false;
-			}
 		}
+		attroff(COLOR_PAIR(clrval));
+		// attroff(COLOR_PAIR(clrattr));
 		yline++;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
@@ -448,7 +555,16 @@ void load_doc(const char* filename, docline** head, docline** tail)
 	docline* lastline = NULL;
 	char ch;
 	int linelen = 0;
-	docline* currline = malloc(sizeof(docline));
+	docline* currline = calloc(1, sizeof(docline));
+	if (currline == NULL)
+	{
+		printw("\nOut of memory, calloc failed.\n");
+		printw("Press any key...");
+		nodelay(stdscr, false);
+		getch();
+		endwin();
+		exit(EXIT_FAILURE);
+	}
 	*head = currline;
 	for(;;)
 	{
@@ -466,7 +582,7 @@ void load_doc(const char* filename, docline** head, docline** tail)
 			// create a newline
 			linelen = 0;
 			lastline = currline;
-			currline = malloc(sizeof(docline));
+			currline = calloc(1, sizeof(docline));
 			currline->prevline = lastline;
 			lastline->nextline = currline;
 		}
