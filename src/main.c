@@ -9,7 +9,6 @@
 - unit tests
 - handle tabs
 - saving
-- mips keyword syntax highlighting
 - cutting and pasting lines
 - scrolling long programs
 - check return value of load_doc for errors
@@ -23,7 +22,6 @@
 
 /*
 todo: 
-- why is there a 4 in the top corner is using xterm?
 - start refactoring now
 - delete/backspace become same function
 - simple menu including saving files
@@ -34,11 +32,6 @@ todo:
   the linked list!)
 - start writing unit tests using check!
 - handle tabs properly
-- store coloring information in a parallel array
-  so we only calculate it when a line changes?
-- should quotes carry over lines? probably not
-- since this is only for cheesy little assembly progs?
-- remove the silly scrolling bar, it's distracting and useless
 */
 
 
@@ -54,11 +47,19 @@ COLOR_WHITE
 */
 
 char* current_filename = NULL;
+char debug_msg[MAX_DEBUG_MSG];
+int debug_countdown = 0;
+
+void set_debug_msg(const char* msg);
+void draw_lines(docline*, int, bool);
+void remove_line(docline* line, docline** head, docline** tail);
+void clear_doc(docline* head);
+void do_menu();
+void parse_line(docline* line);
 
 int main(int argc, char** argv)
 {
 	initscr();
-	int cur_col = 1;
 
 	if (!has_colors())
 	{
@@ -68,10 +69,28 @@ int main(int argc, char** argv)
 		goto cleanup_and_end;	
 	}
 
+	wchar_t ch;
+	double avg_cpu_mhz = 0.0;
+	bool exitFlag = false;
+	bool menuFlag = false;
+	int xpos = 0, ypos = 0;
+	bool had_input = false;
+	int width, height;
+	int linelen;
+	bool screen_clean = true;
+	bool unsaved_changes;
+	char changes;
+
+
+	cbreak();
+	noecho();
+	nodelay(stdscr, TRUE);
+	keypad(stdscr, TRUE);
+	curs_set(0);
+
 	use_default_colors();
 	start_color();
-
-	init_pair(cur_col, COLOR_RED, COLOR_BLACK);
+	init_pair(CUR_PAIR, COLOR_RED, COLOR_BLACK);
 	init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
 	init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
 	init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
@@ -79,38 +98,31 @@ int main(int argc, char** argv)
 	init_pair(REG_PAIR, COLOR_YELLOW, -1);
 	init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
 	init_pair(KEYWORD_PAIR, COLOR_WHITE, -1);
+	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
+
+	int parser_init = init_parser();
+	if (parser_init < 0)
+	{
+		printw("Error initializing parser.\n");
+		if (parser_init == -1)
+			printw("Can't read keywords.dat\n");
+		if (parser_init == -2)
+			printw("Can't read pinstrs.dat\n");
+		printw("Press a key to exit...");
+		getch();
+		goto cleanup_and_end;		
+	}
 
 	mvprintw(0, 0, "eztxt %d.%d - Tyler Weston - F12 exits - %s", 
 		MAJOR_VERSION, MINOR_VERSION, curses_version());
 	mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
-	cbreak();
-	noecho();
-	nodelay(stdscr, TRUE);
-
-	keypad(stdscr, TRUE);
-	curs_set(0);
 	refresh();
-	wchar_t ch;
-	double avg_cpu_mhz = 0.0;
-	bool exitFlag = false;
-	bool menuFlag = false;
-	int xpos = 0, ypos = 0;
-	int scrolltick = 0;
-	bool had_input = false, clear_once = true;
-	int width, height;
-	int linelen;
-	getmaxyx(stdscr, height, width);
 
-	// int topline = 0;
-	// bool screenScrolled = false;
-	// int changedLines = 0;
-	bool screen_clean = true;
-	bool unsaved_changes;
+	getmaxyx(stdscr, height, width);
 
 	docline* firstline = calloc(1, sizeof(docline));
 	firstline->prevline = NULL;
 	firstline->nextline = NULL;
-
 	docline* currline = firstline;
 	docline* head;
 	docline* tail;
@@ -127,7 +139,7 @@ int main(int argc, char** argv)
 		draw_lines(head, height - 1, screen_clean);
 	}
 
-	mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(cur_col), NULL);
+	mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 	while(!exitFlag)
 	{
 
@@ -141,13 +153,29 @@ int main(int argc, char** argv)
 		switch (ch)
 		{
 
+		// ctrl s hangs, so don't use as save
 		// case CTRL('s'):	// this doesn' work, actually freezes
-		// 	goto cleanup_and_end;
-		// 	save_doc(head);
+		// 	// goto cleanup_and_end;
+		// 	// save_doc(head);
+		// 	set_debug_msg("ctrl s");
 		// 	break;
 
 		case ERR:
 			break;
+
+		case CTRL('x'):
+		// cutline
+			set_debug_msg("ctrl x");
+			break;
+
+		case CTRL('v'):
+			set_debug_msg("ctrl v");
+			break;
+
+		// ctrl c breaks, so don't use as copy
+		// case CTRL('c'):
+		// 	set_debug_msg("ctrl c");
+		// 	break;
 
 		case KEY_SLEFT:
 			while (xpos-- >=0 && currline->line[xpos] == ' ');
@@ -162,7 +190,6 @@ int main(int argc, char** argv)
 			break;
 
 		case KEY_RESIZE:
-			clear_once = true;
 			getmaxyx(stdscr, height, width);
 			break;
 
@@ -207,6 +234,7 @@ int main(int argc, char** argv)
 			
 			xpos = 0;
 			++ypos;
+			unsaved_changes = true;
 			break;
 
 		case KEY_UP:
@@ -286,6 +314,7 @@ int main(int argc, char** argv)
 					currline->line[i] = currline->line[i + 1];
 				}
 			}
+			unsaved_changes = true;
 			break;
 
 		case KEY_DC:
@@ -316,9 +345,10 @@ int main(int argc, char** argv)
 					currline->line[i] = currline->line[i + 1];
 				}
 			}
+			unsaved_changes = true;
 			break;
 
-		default:
+		default:	// a typable character
 			// if we're not inserting at back of line, make room
 			if (xpos != strlen(currline->line))
 			{
@@ -330,6 +360,7 @@ int main(int argc, char** argv)
 			}
 			currline->line[xpos] = (char) ch;
 			xpos++;
+			unsaved_changes = true;
 			break;
 		}
 
@@ -349,35 +380,58 @@ int main(int argc, char** argv)
 		{
 			clear();
 			draw_lines(head, height - 1, screen_clean);
-			mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(cur_col), NULL);
+			mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 			if (had_input)
 			{
-				mvprintw(0 , 0, "%d, %d  ", xpos, ypos);
+				if (unsaved_changes)
+					changes = 'U';
+				else
+					changes = ' ';
+				mvprintw(0 , 0, "%d, %d %c ", xpos, ypos, changes);
 				mvprintw(0, width - 6, "%02d, %02d", height, width);
 				
 				if (current_filename)
-					mvprintw(0, (width - strlen(current_filename) + 6) / 2, "eztxt - %s", current_filename);
+					mvprintw(0, (width - strlen(current_filename) - 6) / 2, "eztxt - %s", current_filename);
 				else
 					mvprintw(0, (width - 5) / 2, "eztxt");
 				mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 			}
 		}
 
-		mvprintw(height - 1, 0, "cpu: %.2fMHz", avg_cpu_mhz);
+		if (debug_countdown > 0)
+		{
+			mvprintw(height - 1, 0, "%s", debug_msg);
+		}
+		else
+		{
+			move(height-1, 0);
+			clrtoeol();
+		}
+
+		mvprintw(height - 1, width - 15, "cpu: %.2fMHz", avg_cpu_mhz);
 
 		// screen update
 		if (clock() - now > 500000)
 		{
 			now = clock();
 			avg_cpu_mhz = cpu_info();
-			scrolltick = 0;
+			if (debug_countdown > 0)
+			{
+				--debug_countdown;
+			}
 		}
-
 	}
+
 cleanup_and_end:
 	endwin();
 	exit(EXIT_SUCCESS);
+}
+
+void set_debug_msg(const char* msg)
+{
+	strncpy(debug_msg, msg, MAX_DEBUG_MSG);
+	debug_countdown = DISPLAY_DEBUG_TIME;
 }
 
 

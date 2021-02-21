@@ -1,0 +1,17 @@
+#pinstrs.dat
+MOVE
+CLEAR
+LI
+LA
+B
+BAL
+BGT
+BLE
+BGTU
+BEQZ
+BEQ
+BNE
+REM
+JALR
+NOT
+NOP

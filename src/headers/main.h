@@ -9,8 +9,13 @@
 
 #define LINE_LENGTH 80
 #define BANNER_WIDTH 20
+#define MAX_DEBUG_MSG 16
+#define DISPLAY_DEBUG_TIME 10
+
 #define HALF_BANNER_WIDTH (BANNER_WIDTH / 2)
-#define CTRL(x) ((x) & 0x1f)
+#ifndef CTRL
+#define CTRL(c) ((c) & 037)
+#endif
 
 #define min(a,b)               \
 	({ __typeof__ (a) _a = (a); \
@@ -25,16 +30,11 @@ typedef struct docline
 	struct docline* nextline;
 } docline;
 
-void draw_lines(docline*, int, bool);
-void remove_line(docline* line, docline** head, docline** tail);
-void clear_doc(docline* head);
-void do_menu();
-void parse_line(docline* line);
-
 extern char* current_filename;
 
 // make our colors DEFINEs in this bigger scope?
 // use an enum for this?
+#define CUR_PAIR 1
 #define QUOTE_PAIR 2
 #define BAR_PAIR 3
 #define COMMENT_PAIR 4
@@ -42,3 +42,4 @@ extern char* current_filename;
 #define REG_PAIR 6
 #define SECTION_PAIR 7
 #define KEYWORD_PAIR 8
+#define LABEL_PAIR 9
