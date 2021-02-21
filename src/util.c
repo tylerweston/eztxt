@@ -22,7 +22,7 @@ double cpu_info()
 			const char* p = buf;
 			while(*p && *p != ':') ++p;
 			while(*p && *p == ':') ++p;
-			avg_mhz += strtod(p, NULL);
+			avg_mhz += strtod(p, NULL) * 1e-3;
 			++total;
 		}
 	}

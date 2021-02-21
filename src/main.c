@@ -80,7 +80,7 @@ int main(int argc, char** argv)
 	bool screen_clean = true;
 	bool unsaved_changes;
 	char changes;
-
+	char fname[128];
 
 	cbreak();
 	noecho();
@@ -99,6 +99,8 @@ int main(int argc, char** argv)
 	init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
 	init_pair(KEYWORD_PAIR, COLOR_WHITE, -1);
 	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
+	init_pair(NUM_PAIR, COLOR_CYAN, -1);
+	init_pair(ERROR_PAIR, COLOR_RED, -1);
 
 	int parser_init = init_parser();
 	if (parser_init < 0)
@@ -163,6 +165,23 @@ int main(int argc, char** argv)
 		case ERR:
 			break;
 
+		case CTRL('a'):;
+		// todo: roll custom filename getter
+			fname[0] = '\0';
+			move(height-1, 0);
+			printw("Filename:");
+			echo();
+			nodelay(stdscr, FALSE);
+			getstr(fname);
+			noecho();
+			nodelay(stdscr, TRUE);
+			set_debug_msg("saving");
+			// error check saving
+			save_doc(fname, head);
+			set_debug_msg("file saved");
+			unsaved_changes = false;
+			break;
+
 		case CTRL('x'):
 		// cutline
 			set_debug_msg("ctrl x");
@@ -170,6 +189,34 @@ int main(int argc, char** argv)
 
 		case CTRL('v'):
 			set_debug_msg("ctrl v");
+			break;
+
+		case CTRL('l'):
+			fname[0] = '\0';
+			move(height-1, 0);
+			printw("Filename:");
+			echo();
+			nodelay(stdscr, FALSE);
+			getstr(fname);
+			noecho();
+			nodelay(stdscr, TRUE);
+			// todo: make set_debug_msg better
+			set_debug_msg("loading file");
+			if (check_file_exists(fname) == 0)
+			{
+				set_debug_msg("File not found");
+				break;
+			}
+
+			// TODO: Don't clear doc until we know
+			// file has loaded succesfully!
+			clear_doc(head);
+
+			load_doc(fname, &head, &tail);
+			currline = head;
+			draw_lines(head, height - 1, screen_clean);
+			set_debug_msg("file loaded");
+			unsaved_changes = false;
 			break;
 
 		// ctrl c breaks, so don't use as copy
@@ -409,7 +456,7 @@ int main(int argc, char** argv)
 			clrtoeol();
 		}
 
-		mvprintw(height - 1, width - 15, "cpu: %.2fMHz", avg_cpu_mhz);
+		mvprintw(height - 1, width - 15, "cpu: %.2fGHz", avg_cpu_mhz);
 
 		// screen update
 		if (clock() - now > 500000)

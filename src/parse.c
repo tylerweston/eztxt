@@ -8,6 +8,13 @@
 #define NUM_KEYWORDS 500
 #define NUM_PSEUDOINSTRUCTIONS 20
 
+#define MAX_LABEL_LENGTH 36
+#define MAX_LABELS 100
+
+// for storing labels
+char seen_labels[MAX_LABELS][MAX_LABEL_LENGTH] = {0};
+int labels_seen = 0;
+
 // alphabetize and use binary search?
 char kwords[NUM_KEYWORDS][MAX_TOKEN_LENGTH] = {0};
 char pinstrs[NUM_PSEUDOINSTRUCTIONS][MAX_TOKEN_LENGTH] = {0};
@@ -16,6 +23,9 @@ int num_kwords = 0, num_pinstrs = 0;
 bool is_keyword(const char* token);
 bool is_pseudoinstruction(const char* token);
 int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
+bool is_num(const char* token);
+void add_label(const char* token);
+bool is_label(const char* token);
 
 int init_parser()
 {
@@ -66,7 +76,7 @@ void parse_line(docline* line)
 	bool in_section = false;
 	for (size_t i = 0; i <= strlen(line->line); ++i)
 	{
-		line->formatting[i] = 0;	// line formatting 1 = error
+		line->formatting[i] = COLOR_PAIR(ERROR_PAIR);	// line formatting 1 = error
 		ch = line->line[i];
 		// comments take precedence
 		if (ch == '#')
@@ -143,6 +153,7 @@ got_token:
 		// loop below instead of writing this loop three times
 		if (char_index > 0 && token[char_index - 1] == ':')
 		{
+			add_label(token);
 			for (size_t j = start_index; j < i; ++j)
 			{
 				line->formatting[j] = COLOR_PAIR(LABEL_PAIR) | A_BOLD;
@@ -162,6 +173,20 @@ got_token:
 				line->formatting[j] = A_BOLD;
 			}
 		}
+		else if (is_num(token))
+		{
+			for (size_t j = start_index; j < i; ++j)
+			{
+				line->formatting[j] = COLOR_PAIR(NUM_PAIR);
+			}
+		}
+		else if (is_label(token))
+		{
+			for (size_t j = start_index; j < i; ++j)
+			{
+				line->formatting[j] = COLOR_PAIR(LABEL_PAIR);
+			}
+		}
 		// reset everything
 		start_index = -1;
 		char_index = 0;
@@ -173,6 +198,25 @@ got_token:
 			token[j] = '\0';
 		}
 	}
+}
+
+void add_label(const char* token)
+{
+
+	strncpy( seen_labels[labels_seen], token, strlen(token) - 1);
+	labels_seen++;
+}
+
+bool is_label(const char* token)
+{
+	for (int i = 0; i < labels_seen; ++i)
+	{
+		if (strcmp(token, seen_labels[i]) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool is_keyword(const char* token)
@@ -217,4 +261,11 @@ bool is_pseudoinstruction(const char* token)
 	}
 	free(uppertoken);
 	return false;
+}
+
+bool is_num(const char* token)
+{
+	char* p;
+	strtol(token, &p, MAX_TOKEN_LENGTH);
+	return *p == 0;
 }

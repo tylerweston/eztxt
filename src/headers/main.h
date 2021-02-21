@@ -7,9 +7,10 @@
 #define MAJOR_VERSION 0
 #define MINOR_VERSION 1
 
+#define TAB_DISTANCE 4
 #define LINE_LENGTH 80
 #define BANNER_WIDTH 20
-#define MAX_DEBUG_MSG 16
+#define MAX_DEBUG_MSG 24
 #define DISPLAY_DEBUG_TIME 10
 
 #define HALF_BANNER_WIDTH (BANNER_WIDTH / 2)
@@ -43,3 +44,5 @@ extern char* current_filename;
 #define SECTION_PAIR 7
 #define KEYWORD_PAIR 8
 #define LABEL_PAIR 9
+#define NUM_PAIR 10
+#define ERROR_PAIR 11
