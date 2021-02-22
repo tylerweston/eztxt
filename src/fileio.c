@@ -42,6 +42,15 @@ int load_doc(const char* filename, docline** head, docline** tail)
 			currline->prevline = lastline;
 			lastline->nextline = currline;
 		}
+		else if (ch == '\t')
+		{
+			int tab_target = TAB_DISTANCE - (linelen % TAB_DISTANCE);
+			for (int i = 0; i < tab_target; ++i)
+			{
+				currline->line[linelen] = ' ';
+				linelen++;
+			}
+		}
 		else
 		{
 			currline->line[linelen] = ch;

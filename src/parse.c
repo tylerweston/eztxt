@@ -60,10 +60,46 @@ int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH])
 	return line_count;
 }
 
-// void read_pseudoinstructions(const char* filename)
-// {
+void clear_labels()
+{
+	labels_seen = 0;
+}
 
-// }
+void find_labels(docline* line)
+{
+	// should we clear here?
+	char maybe_label[MAX_LABEL_LENGTH];
+	while (line)
+	{
+		maybe_label[0] = '\0';
+		size_t curindex = 0;
+		char ch;
+		for (size_t i = 0; i <strlen(line->line); ++i)
+		{
+			ch = line->line[i];
+			if (ch == ' ' || ch == '\n' || 
+				ch == '\t' || ch == '(' ||
+				ch == '.' || ch == ')' ||
+				ch == '\0')
+			{
+				maybe_label[curindex] = '\0';
+				if (maybe_label[curindex-1] == ':')
+				{
+					add_label(maybe_label);
+				}
+				curindex = 0;
+				maybe_label[0] = '\0';
+			}
+			else
+			{
+				maybe_label[curindex++] = ch;
+			}
+		}
+
+		line = line->nextline;
+	}
+}
+
 
 void parse_line(docline* line)
 {
@@ -74,6 +110,7 @@ void parse_line(docline* line)
 	bool in_comment = false;
 	bool in_register = false;
 	bool in_section = false;
+	attr_t to_assign;
 	for (size_t i = 0; i <= strlen(line->line); ++i)
 	{
 		line->formatting[i] = COLOR_PAIR(ERROR_PAIR);	// line formatting 1 = error
@@ -149,43 +186,34 @@ void parse_line(docline* line)
 
 got_token:
 		token[char_index] = '\0';
-		// todo: assign attr here and then use them in a
-		// loop below instead of writing this loop three times
+		to_assign = 0;
 		if (char_index > 0 && token[char_index - 1] == ':')
 		{
-			add_label(token);
-			for (size_t j = start_index; j < i; ++j)
-			{
-				line->formatting[j] = COLOR_PAIR(LABEL_PAIR) | A_BOLD;
-			}
+			to_assign = COLOR_PAIR(LABEL_PAIR) | A_BOLD;;
 		}
 		else if (is_pseudoinstruction(token))
 		{
-			for (size_t j = start_index; j < i; ++j)
-			{
-				line->formatting[j] = A_BOLD | A_UNDERLINE;
-			}
+			to_assign = A_BOLD | A_UNDERLINE;
 		}
 		else if (is_keyword(token))
 		{
-			for (size_t j = start_index; j < i; ++j)
-			{
-				line->formatting[j] = A_BOLD;
-			}
+			to_assign = A_BOLD;
 		}
 		else if (is_num(token))
 		{
-			for (size_t j = start_index; j < i; ++j)
-			{
-				line->formatting[j] = COLOR_PAIR(NUM_PAIR);
-			}
+			to_assign = COLOR_PAIR(NUM_PAIR);
 		}
 		else if (is_label(token))
 		{
+			to_assign = COLOR_PAIR(LABEL_PAIR);
+		}
+
+		if (to_assign!= 0)
+		{
 			for (size_t j = start_index; j < i; ++j)
 			{
-				line->formatting[j] = COLOR_PAIR(LABEL_PAIR);
-			}
+				line->formatting[j] = to_assign;
+			}	
 		}
 		// reset everything
 		start_index = -1;
@@ -202,7 +230,6 @@ got_token:
 
 void add_label(const char* token)
 {
-
 	strncpy( seen_labels[labels_seen], token, strlen(token) - 1);
 	labels_seen++;
 }
@@ -211,6 +238,7 @@ bool is_label(const char* token)
 {
 	for (int i = 0; i < labels_seen; ++i)
 	{
+		// segfault is here
 		if (strcmp(token, seen_labels[i]) == 0)
 		{
 			return true;

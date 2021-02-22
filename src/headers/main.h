@@ -3,6 +3,7 @@
 #include <wchar.h>
 #include <string.h>
 #include <time.h>
+#include <stdarg.h>
 
 #define MAJOR_VERSION 0
 #define MINOR_VERSION 1
@@ -32,6 +33,8 @@ typedef struct docline
 } docline;
 
 extern char* current_filename;
+
+int align(int num);
 
 // make our colors DEFINEs in this bigger scope?
 // use an enum for this?

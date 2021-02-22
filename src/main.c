@@ -24,9 +24,9 @@
 todo: 
 - start refactoring now
 - delete/backspace become same function
-- simple menu including saving files
+- add menu in addition to shortcut keys
 - longer files and scrolling 
-- pressing CTRL or ALT breaks things
+- pressing CTRL or ALT breaks things?!
 - add cutline + paste line (or lines?) option
  (this will just be moving things around in
   the linked list!)
@@ -50,12 +50,13 @@ char* current_filename = NULL;
 char debug_msg[MAX_DEBUG_MSG];
 int debug_countdown = 0;
 
-void set_debug_msg(const char* msg);
+void set_debug_msg(const char* msg, ...);
 void draw_lines(docline*, int, bool);
 void remove_line(docline* line, docline** head, docline** tail);
 void clear_doc(docline* head);
 void do_menu();
 void parse_line(docline* line);
+int align_tab(int num);
 
 int main(int argc, char** argv)
 {
@@ -128,8 +129,12 @@ int main(int argc, char** argv)
 	docline* currline = firstline;
 	docline* head;
 	docline* tail;
+
+	docline* topline;
+
 	head = firstline;
 	tail = firstline;
+
 
 	clock_t now = clock();
 
@@ -139,8 +144,10 @@ int main(int argc, char** argv)
 		load_doc(argv[1], &head, &tail);
 		currline = head;
 		draw_lines(head, height - 1, screen_clean);
+		find_labels(head);
 	}
 
+	topline = head;
 	mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 	while(!exitFlag)
 	{
@@ -169,16 +176,16 @@ int main(int argc, char** argv)
 		// todo: roll custom filename getter
 			fname[0] = '\0';
 			move(height-1, 0);
-			printw("Filename:");
+			printw("Filename: ");
 			echo();
 			nodelay(stdscr, FALSE);
 			getstr(fname);
 			noecho();
 			nodelay(stdscr, TRUE);
-			set_debug_msg("saving");
+			set_debug_msg("Saving %s", fname);
 			// error check saving
 			save_doc(fname, head);
-			set_debug_msg("file saved");
+			set_debug_msg("Saved %s", fname);
 			unsaved_changes = false;
 			break;
 
@@ -201,7 +208,7 @@ int main(int argc, char** argv)
 			noecho();
 			nodelay(stdscr, TRUE);
 			// todo: make set_debug_msg better
-			set_debug_msg("loading file");
+			set_debug_msg("Loading %s", fname);
 			if (check_file_exists(fname) == 0)
 			{
 				set_debug_msg("File not found");
@@ -215,7 +222,7 @@ int main(int argc, char** argv)
 			load_doc(fname, &head, &tail);
 			currline = head;
 			draw_lines(head, height - 1, screen_clean);
-			set_debug_msg("file loaded");
+			set_debug_msg("Loaded %s", fname);
 			unsaved_changes = false;
 			break;
 
@@ -285,7 +292,16 @@ int main(int argc, char** argv)
 			break;
 
 		case KEY_UP:
-			if (currline->prevline)
+			if (ypos == 0)
+			{
+				if (currline->prevline)
+				{
+					topline = topline->prevline;
+					currline = currline->prevline;
+					xpos = min(xpos, strlen(currline->line));					
+				}
+			}
+			else if (currline->prevline)
 			{
 				currline = currline->prevline;
 				xpos = min(xpos, strlen(currline->line));
@@ -294,7 +310,16 @@ int main(int argc, char** argv)
 			break;
 
 		case KEY_DOWN:
-			if (currline->nextline)
+			if (ypos == height - 3)
+			{
+				if (currline->nextline)
+				{
+					topline = topline->nextline;
+					currline = currline->nextline;
+					xpos = min(xpos, strlen(currline->line));
+				}
+			}
+			else if (currline->nextline)
 			{
 				currline = currline->nextline;
 				xpos = min(xpos, strlen(currline->line));
@@ -395,6 +420,24 @@ int main(int argc, char** argv)
 			unsaved_changes = true;
 			break;
 
+		case '\t':;
+			// insert TAB_DISTANCE spaces
+			int tab_target = TAB_DISTANCE - (xpos % TAB_DISTANCE);
+			if (xpos + tab_target < LINE_LENGTH)
+			{
+				for (int i = LINE_LENGTH; i > xpos + tab_target; --i)
+				{
+					currline->line[i] = currline->line[i - tab_target];
+				}
+				for (int i = xpos; i < xpos + tab_target; ++i)
+				{
+					currline->line[i] = ' ';
+				}
+				xpos += tab_target;
+				unsaved_changes = true;
+			}
+			break;
+
 		default:	// a typable character
 			// if we're not inserting at back of line, make room
 			if (xpos != strlen(currline->line))
@@ -425,8 +468,12 @@ int main(int argc, char** argv)
 
 		if (!screen_clean)
 		{
+			// this will go somewhere else!
+			clear_labels();
+			find_labels(head);
+
 			clear();
-			draw_lines(head, height - 1, screen_clean);
+			draw_lines(topline, height - 1, screen_clean);
 			mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 			if (had_input)
@@ -475,9 +522,13 @@ cleanup_and_end:
 	exit(EXIT_SUCCESS);
 }
 
-void set_debug_msg(const char* msg)
+void set_debug_msg(const char* msg, ...)
 {
-	strncpy(debug_msg, msg, MAX_DEBUG_MSG);
+	//strncpy(debug_msg, msg, MAX_DEBUG_MSG);
+	va_list args;
+	va_start (args, msg);
+	vsprintf(debug_msg, msg, args);
+	va_end (args);
 	debug_countdown = DISPLAY_DEBUG_TIME;
 }
 
@@ -553,3 +604,10 @@ void do_menu()
 	printw("MENU...");
 	getch();
 }
+
+// inline int align(int num) {
+// 	// return num rounded up to closest multiple of 4
+// 	int remainder = num % TAB_DISTANCE;
+//     if (remainder != 0) num += TAB_DISTANCE - remainder;
+//     return num;
+// }
