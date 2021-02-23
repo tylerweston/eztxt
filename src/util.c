@@ -6,6 +6,9 @@
 #include <string.h>
 #include "headers/util.h"
 
+
+// show info from /proc/version maybe?
+
 double cpu_info()
 {
 	// calculate avg mhz used by cpus currently

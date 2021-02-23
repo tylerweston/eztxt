@@ -5,6 +5,7 @@
 
 /*
 *TODO:*
+- insert action (action type, location, character?)
 - left/right scrolling
 - fix up line numbers
 - command line options?
@@ -434,6 +435,7 @@ int main(int argc, char** argv)
 
 		case KEY_BACKSPACE:
 		{
+			// TODO: We can combine backspace and delete probably!
 			if (xpos == 0)
 			{
 				// bring the line onto the one above

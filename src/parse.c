@@ -11,6 +11,10 @@
 #define MAX_LABEL_LENGTH 36
 #define MAX_LABELS 100
 
+// TODO:
+// - hex coloring
+// - character literals
+
 // for storing labels
 char seen_labels[MAX_LABELS][MAX_LABEL_LENGTH] = {0};
 int labels_seen = 0;
@@ -115,6 +119,7 @@ void parse_line(docline* line)
 	int start_index = -1, char_index = 0;
 	char ch;
 	bool in_quotes = false;
+	bool in_single_quotes = false;
 	bool in_comment = false;
 	bool in_register = false;
 	bool in_section = false;
@@ -145,7 +150,20 @@ void parse_line(docline* line)
 			in_quotes = false;
 		}
 
-		if (in_quotes)
+		// this are is single quotes
+		// give double quotes priority so we can use single quotes
+		// inside double quotes
+		if (ch == '\'' && !in_quotes && !in_single_quotes)
+		{
+			in_single_quotes = true;
+		}
+		else if (ch == '\'' && !in_quotes && in_single_quotes)
+		{
+			line->formatting[i] = COLOR_PAIR(QUOTE_PAIR);
+			in_single_quotes = false;
+		}
+
+		if (in_quotes || in_single_quotes)
 		{
 			line->formatting[i] = COLOR_PAIR(QUOTE_PAIR);
 			continue;
@@ -304,10 +322,9 @@ bool is_num(const char* token)
 	// failsafe
 	if (strlen(token) == 0)
 		return false;
+	// base 0 = check for decimal, octal, or hex numbers
+	// 0 prefix = octal, 0x = hex, otherwise, decimal
 	char* p;
-	strtol(token, &p, MAX_TOKEN_LENGTH);
-	// check isdigit/- otherwise strtol would consider
-	// things like ab a number (hex!)
-	return ((isdigit(token[0]) || token[0] == '-')
-			 && *p == 0);
+	strtol(token, &p, 0);
+	return *p == 0;
 }
