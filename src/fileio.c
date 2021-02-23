@@ -86,10 +86,7 @@ int check_file_exists(const char* filename)
 
 void save_doc(const char* filename, docline* head)
 {
-	// todo: check if document exists already and ask
-	// about overwrite? no, check if doc exists somewhere
-	// else?
-	// saving a document goes here
+	// save a document
 	// go through line by line and write them out to a filename
 	FILE* fptr = fopen(filename, "w");
 	docline* cur = head;

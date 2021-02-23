@@ -4,15 +4,18 @@
 #include <string.h>
 #include <time.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 1
+#define MINOR_VERSION 2
 
 #define TAB_DISTANCE 4
 #define LINE_LENGTH 80
 #define BANNER_WIDTH 20
 #define MAX_DEBUG_MSG 24
 #define DISPLAY_DEBUG_TIME 10
+#define MAX_RESPONSE_SIZE 36
+#define MAX_FILE_NAME 36
 
 #define HALF_BANNER_WIDTH (BANNER_WIDTH / 2)
 #ifndef CTRL
@@ -33,8 +36,6 @@ typedef struct docline
 } docline;
 
 extern char* current_filename;
-
-int align(int num);
 
 // make our colors DEFINEs in this bigger scope?
 // use an enum for this?

@@ -82,7 +82,9 @@ void find_labels(docline* line)
 				ch == '.' || ch == ')' ||
 				ch == '\0')
 			{
-				maybe_label[curindex] = '\0';
+				// twice, clean it
+				if (maybe_label[curindex] != '\0')
+					maybe_label[curindex] = '\0';
 				if (maybe_label[curindex-1] == ':')
 				{
 					add_label(maybe_label);
@@ -95,7 +97,13 @@ void find_labels(docline* line)
 				maybe_label[curindex++] = ch;
 			}
 		}
-
+		// twice, clean it
+		if (maybe_label[curindex] != '\0')
+			maybe_label[curindex] = '\0';
+		if (maybe_label[curindex-1] == ':')
+		{
+			add_label(maybe_label);
+		}
 		line = line->nextline;
 	}
 }
@@ -293,7 +301,13 @@ bool is_pseudoinstruction(const char* token)
 
 bool is_num(const char* token)
 {
+	// failsafe
+	if (strlen(token) == 0)
+		return false;
 	char* p;
 	strtol(token, &p, MAX_TOKEN_LENGTH);
-	return *p == 0;
+	// check isdigit/- otherwise strtol would consider
+	// things like ab a number (hex!)
+	return ((isdigit(token[0]) || token[0] == '-')
+			 && *p == 0);
 }
