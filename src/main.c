@@ -5,11 +5,11 @@
 
 /*
 *TODO:*
-- get string should take a max # of chars to take as input
+- left/right scrolling
+- fix up line numbers
+- command line options?
 - lots of bug fixes
 - unit tests
-- cutting and pasting lines
-- check return value of load_doc for errors
 
 *MAYBE TODO:*
 - undo/redo functions?
@@ -24,10 +24,8 @@ todo:
 - delete/backspace become same function
 - add menu in addition to shortcut keys
 - pressing CTRL or ALT breaks things?!
-- add cutline + paste line (or lines?) option
- (this will just be moving things around in
-  the linked list!)
 - start writing unit tests using check!
+- change cursor into a cursorpos struct
 */
 
 char* current_filename = NULL;
@@ -42,9 +40,17 @@ void do_menu();
 void parse_line(docline* line);
 int align_tab(int num);
 bool get_string(char* prompt, char* start, char* response, size_t max_size);
+void save_document();
 
-#define ESC 27
+// GLOBALS: TODO: Get these outta here!
 size_t width, height;
+bool show_line_no = false;
+size_t absy = 0;			// absolute-y position in document
+char fname[MAX_FILE_NAME];
+docline* currline;
+docline* head;
+docline* tail;
+bool unsaved_changes = false;
 
 int main(int argc, char** argv)
 {
@@ -62,14 +68,19 @@ int main(int argc, char** argv)
 	double avg_cpu_mhz = 0.0;
 	bool exitFlag = false;
 	bool menuFlag = false;
-	size_t xpos = 0, ypos = 0;
+	size_t xpos = 0, ypos = 0;	// screen position
+	size_t cursor_width = 1;
+
 	bool had_input = false;
 
 	size_t linelen;
 	bool screen_clean = true;
-	bool unsaved_changes;
+
 	char changes;
-	char fname[MAX_FILE_NAME];
+
+
+	docline* copy_line = NULL;
+	docline* cut_line = NULL;
 
 	cbreak();
 	noecho();
@@ -90,6 +101,7 @@ int main(int argc, char** argv)
 	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
 	init_pair(NUM_PAIR, COLOR_CYAN, -1);
 	init_pair(ERROR_PAIR, COLOR_RED, -1);
+	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
 
 	int parser_init = init_parser();
 	if (parser_init < 0)
@@ -111,23 +123,24 @@ int main(int argc, char** argv)
 
 	getmaxyx(stdscr, height, width);
 
+	// document lines doubly linked list
 	docline* firstline = calloc(1, sizeof(docline));
 	firstline->prevline = NULL;
 	firstline->nextline = NULL;
-	docline* currline = firstline;
-	docline* head;
-	docline* tail;
-
-	docline* topline;
 
 	head = firstline;
 	tail = firstline;
+	currline = firstline;
 
+	// top line to display for scrolling
+	docline* topline;
 
 	clock_t now = clock();
 
-	if (argc != 1)
+	// TODO: Parse command line here
+	if (argc != 1 && check_file_exists(argv[1]))
 	{
+		// we can move all this stuff to a load file function
 		clear_doc(head);
 		load_doc(argv[1], &head, &tail);
 		currline = head;
@@ -135,8 +148,15 @@ int main(int argc, char** argv)
 		draw_lines(head, height - 1, screen_clean);
 	}
 
+	// set topline here in case we loaded a file above
 	topline = head;
-	mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+
+	// initial cursor
+	int absx = xpos;
+	if (show_line_no)
+		absx += 5;
+	mvchgat(ypos + 1, absx, cursor_width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+
 	while(!exitFlag)
 	{
 
@@ -150,48 +170,62 @@ int main(int argc, char** argv)
 		switch (ch)
 		{
 
-		// ctrl s hangs, so don't use as save
-		// case CTRL('s'):	// this doesn' work, actually freezes
-		// 	// goto cleanup_and_end;
-		// 	// save_doc(head);
-		// 	set_debug_msg("ctrl s");
-		// 	break;
-
 		case ERR:
 			break;
 
-		case CTRL('a'):;
-			memset(fname, 0, MAX_FILE_NAME);
-			if (!get_string("Save file", current_filename, fname, MAX_FILE_NAME))
+		case CTRL('a'):		// save file
+		{
+			save_document();
+			break;
+		}
+
+		case CTRL('k'):		// cut line
+		{
+			if (cut_line)
+				free(cut_line);
+			if (copy_line)
+				copy_line = NULL;
+			cut_line = currline;
+			docline* tmp = currline->nextline;
+			remove_line(currline, &head, &tail);
+			currline = tmp;
+			break;
+		}
+
+		case CTRL('x'):		// copy line
+		{
+			copy_line = currline;
+			if (cut_line)
+				free(cut_line);
+			break;
+		}
+
+		case CTRL('v'):		// paste line
+		{
+			if (!(cut_line || copy_line))
 				break;
-			// error check saving
-			if (check_file_exists(fname) != 0)
-			{
-				char sure[2];
-				get_string ("File exists! Overwrite? (Y/n)", NULL, sure, 1);
-				if (!(sure[0] == 'Y' || sure[0] == 'y'))
-					break;
-			}
-			set_debug_msg("Saving %s", fname);
-			save_doc(fname, head);
-			if (current_filename)
-				free(current_filename);
-			current_filename = strdup(fname);
-			set_debug_msg("Saved %s", fname);
-			unsaved_changes = false;
-			break;
+			set_debug_msg("paste line");
+			docline* newline = calloc(1, sizeof(docline));
+			docline* source;
+			if (cut_line)
+				source = cut_line;
+			else
+				source = copy_line;
+			strncpy(newline->line, source->line, LINE_LENGTH);	// needs to be -1?
 
-		case CTRL('x'):
-		// cutline
-			set_debug_msg("ctrl x");
+			newline->nextline = currline;
+			newline->prevline = currline->prevline;
+			if (currline->prevline)
+				currline->prevline->nextline = newline;
+			currline->prevline = newline;
+			if (currline == head)
+				head = newline;
+			currline = newline;
 			break;
+		}
 
-		case CTRL('v'):
-		// paste line
-			set_debug_msg("ctrl v");
-			break;
-
-		case CTRL('l'):
+		case CTRL('l'):		// load a file
+		{
 			memset(fname, 0, MAX_FILE_NAME);
 			if (!get_string("Load file", NULL, fname, MAX_FILE_NAME))
 				break;
@@ -203,9 +237,17 @@ int main(int argc, char** argv)
 			}
 			// TODO: Don't clear doc until we know
 			// file has loaded succesfully?
+			docline* tmp_head;
+
+			// return a value from load_doc. make load_doc take a temp head and if
+			// it succeeds, clear the old doc and set the new head to the temp head
+			if (load_doc(fname, &tmp_head, &tail) == -1)
+			{
+				set_debug_msg("Error loading %s", fname);
+				break;
+			}
 			clear_doc(head);
-			// return a value from load_doc
-			load_doc(fname, &head, &tail);
+			head = tmp_head;
 			find_labels(head);
 			currline = head;
 			topline = head;
@@ -213,6 +255,7 @@ int main(int argc, char** argv)
 			set_debug_msg("Loaded %s", fname);
 			unsaved_changes = false;
 			break;
+		}
 
 		// ctrl c breaks, so don't use as copy
 		// case CTRL('c'):
@@ -220,21 +263,32 @@ int main(int argc, char** argv)
 		// 	break;
 
 		case KEY_SLEFT:
+		{
+			size_t oldxpos = xpos;
 			while (xpos > 0 && currline->line[xpos] == ' ') --xpos;
 			while (xpos > 0 && currline->line[xpos] != ' ') --xpos;
+			cursor_width = oldxpos - xpos;
 			break;
+		}
 
 		case KEY_SRIGHT:
+		{
+			size_t oldxpos = xpos;
 			linelen = strlen(currline->line);
 			while (xpos++ < linelen && currline->line[xpos] == ' ');
 			while (xpos++ < linelen && currline->line[xpos] != ' ');
+			cursor_width = xpos - oldxpos;
 			break;
+		}
 
 		case KEY_RESIZE:
+		{
 			getmaxyx(stdscr, height, width);
 			break;
+		}
 
-		case '\n':;	// ENTER key, KEY_ENTER doesn't work?
+		case '\n':
+		{	// ENTER key, KEY_ENTER doesn't work?
 			docline* newline = calloc(1, sizeof(docline));
 			// Handle special case where we are at first character
 			// of the line, then we can just insert a new blank line before this
@@ -250,6 +304,7 @@ int main(int argc, char** argv)
 					head = newline;
 				unsaved_changes = true;
 				++ypos;
+				++absy;
 				break;
 			}
 			// if we get here, we aren't special case head of line
@@ -275,17 +330,22 @@ int main(int argc, char** argv)
 			
 			xpos = 0;
 			++ypos;
+			++absy;
 			unsaved_changes = true;
 			break;
+		}
 
 		case KEY_UP:
+		{
+			cursor_width = 1;
 			if (ypos == 0)
 			{
 				if (currline->prevline)
 				{
 					topline = topline->prevline;
 					currline = currline->prevline;
-					xpos = min(xpos, strlen(currline->line));					
+					xpos = min(xpos, strlen(currline->line));	
+					--absy;				
 				}
 			}
 			else if (currline->prevline)
@@ -293,10 +353,14 @@ int main(int argc, char** argv)
 				currline = currline->prevline;
 				xpos = min(xpos, strlen(currline->line));
 				--ypos;
+				--absy;
 			}
 			break;
+		}
 
 		case KEY_DOWN:
+		{
+			cursor_width = 1;
 			if (ypos == height - 3)
 			{
 				if (currline->nextline)
@@ -304,6 +368,7 @@ int main(int argc, char** argv)
 					topline = topline->nextline;
 					currline = currline->nextline;
 					xpos = min(xpos, strlen(currline->line));
+					++absy;
 				}
 			}
 			else if (currline->nextline)
@@ -311,14 +376,19 @@ int main(int argc, char** argv)
 				currline = currline->nextline;
 				xpos = min(xpos, strlen(currline->line));
 				++ypos;
+				++absy;
 			}
 			break;
+		}
 
 		case KEY_LEFT:
+		{
+			cursor_width = 1;
 			if (xpos == 0 && currline->prevline)
 			{
 				currline = currline->prevline;
-				ypos--;
+				--ypos;
+				--absy;
 				xpos = strlen(currline->line);
 			}
 			else if (xpos > 0)
@@ -326,36 +396,44 @@ int main(int argc, char** argv)
 				xpos--;	
 			}
 			break;
+		}
 
 		case KEY_RIGHT:
+		{
+			cursor_width = 1;
 			xpos++;
 			if ((size_t)xpos > strlen(currline->line) && currline->nextline)
 			{
 				currline = currline->nextline;
-				ypos++;
+				++ypos;
+				++absy;
 				xpos = 0;
 			}
 			break;
+		}
 
 		case ESC:
 		case KEY_F(12):
+		{
+			if (unsaved_changes)
+			{
+			char sure[2];
+			get_string ("You have unsaved changes, save?(Y/n)", NULL, sure, 1);
+			if ((sure[0] == 'Y' || sure[0] == 'y'))
+				save_document();			
+			}
 			exitFlag = true;
 			break;
+		}
 
 		case KEY_F(2):
+		{
 			menuFlag = true;
 			break;
-
-		// case KEY_F(3):;
-		// // prompt test
-		// 	char r[MAX_RESPONSE_SIZE];
-		// 	if (get_string("prompt", "default.txt", r))
-		// 		set_debug_msg("d: %s", r);
-		// 	else
-		// 		set_debug_msg("escape!");
-		// 	break;
+		}
 
 		case KEY_BACKSPACE:
+		{
 			if (xpos == 0)
 			{
 				// bring the line onto the one above
@@ -372,7 +450,8 @@ int main(int argc, char** argv)
 					docline* tmp = currline->prevline;
 					remove_line(currline, &head, &tail);
 					currline = tmp;
-					ypos--;
+					--ypos;
+					--absy;
 					xpos = newxpos;
 
 				}
@@ -388,8 +467,10 @@ int main(int argc, char** argv)
 			}
 			unsaved_changes = true;
 			break;
+		}
 
 		case KEY_DC:
+		{
 			if (xpos == 0 && currline->line[0] == '\0')
 			{
 				if (currline == head && currline->nextline == NULL)
@@ -402,6 +483,7 @@ int main(int argc, char** argv)
 				{
 					tmp = currline->prevline;
 					--ypos;
+					--absy;
 				}
 				else
 				{
@@ -419,8 +501,10 @@ int main(int argc, char** argv)
 			}
 			unsaved_changes = true;
 			break;
+		}
 
-		case '\t':;
+		case '\t':
+		{
 			// insert TAB_DISTANCE spaces
 			int tab_target = TAB_DISTANCE - (xpos % TAB_DISTANCE);
 			if (xpos + tab_target < LINE_LENGTH)
@@ -437,8 +521,10 @@ int main(int argc, char** argv)
 				unsaved_changes = true;
 			}
 			break;
+		}
 
 		default:	// a typable character
+		{
 			// if we're not inserting at back of line, make room
 			if (xpos != strlen(currline->line))
 			{
@@ -452,6 +538,7 @@ int main(int argc, char** argv)
 			xpos++;
 			unsaved_changes = true;
 			break;
+		}
 		}
 
 		if (xpos > 1000)
@@ -475,7 +562,13 @@ int main(int argc, char** argv)
 
 			clear();
 			draw_lines(topline, height - 1, screen_clean);
-			mvchgat(ypos + 1, xpos, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+			absx = xpos;
+			if (show_line_no)
+				absx += 5;
+			// cursor_width won't be the best way to do this, ie what about beween
+			// lines? we need a START_CURSOR and END_CURSOR I guess?
+			// and we could have multi-carat support at some point as well!
+			mvchgat(ypos + 1, absx, cursor_width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 			if (had_input)
 			{
@@ -483,7 +576,7 @@ int main(int argc, char** argv)
 					changes = 'U';
 				else
 					changes = ' ';
-				mvprintw(0 , 0, "%d, %d %c ", xpos, ypos, changes);
+				mvprintw(0 , 0, "%d, %d %c ", (xpos + 1), (absy + 1), changes);
 				mvprintw(0, width - 6, "%02d, %02d", height, width);
 				
 				if (current_filename)
@@ -519,6 +612,7 @@ int main(int argc, char** argv)
 	}
 
 cleanup_and_end:
+	clear_doc(head);
 	endwin();
 	exit(EXIT_SUCCESS);
 }
@@ -559,10 +653,6 @@ void draw_lines(docline* top, int max_lines, bool clean)
 	// 	return;
 	docline* cur = top;
 	int yline = 1;
-	// super cheap just to clear entire screen?
-	// clear();
-	// TODO: Figure out how scrolling for long documents is going to happen here
-	// just to test out quote highlights
 	char ch;
 	do 
 	{
@@ -571,6 +661,14 @@ void draw_lines(docline* top, int max_lines, bool clean)
 		int clrval = 0;
 		parse_line(cur);
 		bool first = true;
+		int absx = 0;
+		if (show_line_no)
+		{
+			attron(COLOR_PAIR(LINE_NO_PAIR));
+			// TODO: scrolling not supported yet for line numbers!
+			mvprintw(yline, 0, "%03d:", yline);
+			attroff(COLOR_PAIR(LINE_NO_PAIR));
+		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
 		{
 			ch = cur->line[x];
@@ -581,13 +679,39 @@ void draw_lines(docline* top, int max_lines, bool clean)
 			first = false;
 			clrval = cur->formatting[x];
 			attron(clrval);
-			mvprintw(yline, x, "%c", ch);
+			if (show_line_no)
+				absx = x + 5;
+			else
+				absx = x;
+			mvprintw(yline, absx, "%c", ch);
 		}
 		attroff(clrval);
 		yline++;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
 	refresh();
+}
+
+void save_document()
+{
+	memset(fname, 0, MAX_FILE_NAME);
+	if (!get_string("Save file", current_filename, fname, MAX_FILE_NAME))
+		return;
+	// error check saving
+	if (check_file_exists(fname) != 0)
+	{
+		char sure[2];
+		get_string ("File exists! Overwrite? (Y/n)", NULL, sure, 1);
+		if (!(sure[0] == 'Y' || sure[0] == 'y'))
+			return;
+	}
+	set_debug_msg("Saving %s", fname);
+	save_doc(fname, head);
+	if (current_filename)
+		free(current_filename);
+	current_filename = strdup(fname);
+	set_debug_msg("Saved %s", fname);
+	unsaved_changes = false;	
 }
 
 // void get_text()
@@ -682,7 +806,7 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 
 void clear_doc(docline* head)
 {
-	// free all memoy used by a document
+	// free all memory used by a document
 	docline* tmp;
 	while (head != NULL)
 	{

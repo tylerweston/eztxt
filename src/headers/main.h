@@ -11,15 +11,17 @@
 
 #define TAB_DISTANCE 4
 #define LINE_LENGTH 80
-#define BANNER_WIDTH 20
 #define MAX_DEBUG_MSG 24
 #define DISPLAY_DEBUG_TIME 10
 #define MAX_RESPONSE_SIZE 36
 #define MAX_FILE_NAME 36
 
-#define HALF_BANNER_WIDTH (BANNER_WIDTH / 2)
+// maybe a system has already defined these?
 #ifndef CTRL
 #define CTRL(c) ((c) & 037)
+#endif
+#ifndef ESC
+#define ESC 27
 #endif
 
 #define min(a,b)               \
@@ -29,16 +31,20 @@
 
 typedef struct docline 
 {
-	char line[LINE_LENGTH];
+	char line[LINE_LENGTH];			// text content of a line
 	attr_t formatting[LINE_LENGTH];	// use this to store color
 	struct docline* prevline;
 	struct docline* nextline;
 } docline;
 
+typedef struct
+{
+	size_t xpos;
+	size_t ypos;
+} cursor_pos;
+
 extern char* current_filename;
 
-// make our colors DEFINEs in this bigger scope?
-// use an enum for this?
 #define CUR_PAIR 1
 #define QUOTE_PAIR 2
 #define BAR_PAIR 3
@@ -50,3 +56,4 @@ extern char* current_filename;
 #define LABEL_PAIR 9
 #define NUM_PAIR 10
 #define ERROR_PAIR 11
+#define LINE_NO_PAIR 12

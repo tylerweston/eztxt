@@ -68,7 +68,7 @@ void clear_labels()
 void find_labels(docline* line)
 {
 	// should we clear here?
-	char maybe_label[MAX_LABEL_LENGTH];
+	char maybe_label[MAX_LABEL_LENGTH] = {0};
 	while (line)
 	{
 		maybe_label[0] = '\0';
