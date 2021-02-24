@@ -41,6 +41,8 @@ typedef struct
 {
 	size_t xpos;
 	size_t ypos;
+	docline* currline;
+	// todo: each cursor will keep track of it's own current line!
 } cursor_pos;
 
 extern char* current_filename;

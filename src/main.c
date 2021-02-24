@@ -5,9 +5,9 @@
 
 /*
 *TODO:*
+- occasional random segfaults when scrolling around
 - insert action (action type, location, character?)
 - left/right scrolling
-- fix up line numbers
 - command line options?
 - lots of bug fixes
 - unit tests
@@ -40,19 +40,37 @@ void do_menu();
 void parse_line(docline* line);
 int align_tab(int num);
 bool get_string(char* prompt, char* start, char* response, size_t max_size);
+
+void load_document();
 void save_document();
 
-// GLOBALS: TODO: Get these outta here!
+// cursor movements
+void cursor_left(cursor_pos* cursor);
+void cursor_right(cursor_pos* cursor);
+void cursor_up(cursor_pos* cursor);
+void cursor_down(cursor_pos* cursor);
+
+// cursor actions
+void remove_char(cursor_pos* cursor);
+
+// GLOBALS: TODO: Get these outta here! 
 size_t width, height;
-bool show_line_no = true;
-bool syntax_highlighting = true;
 size_t absy = 0;			// absolute-y position in document
 char fname[MAX_FILE_NAME];
 docline* currline;
 docline* head;
 docline* tail;
 bool unsaved_changes = false;
+
+// these willbecome command line options
+bool show_line_no = true;
+bool syntax_highlighting = true;
+
+// top line to display for scrolling
+docline* topline;
 size_t toplineno = 1;
+
+cursor_pos main_cursor;
 
 int main(int argc, char** argv)
 {
@@ -70,9 +88,9 @@ int main(int argc, char** argv)
 	double avg_cpu_mhz = 0.0;
 	bool exitFlag = false;
 	bool menuFlag = false;
-	size_t xpos = 0, ypos = 0;	// screen position
-
-	size_t cursor_width = 1;
+	//size_t xpos = 0, ypos = 0;	// screen position
+	main_cursor.xpos = 0;
+	main_cursor.ypos = 0;
 
 	bool had_input = false;
 
@@ -133,10 +151,7 @@ int main(int argc, char** argv)
 
 	head = firstline;
 	tail = firstline;
-	currline = firstline;
-
-	// top line to display for scrolling
-	docline* topline;
+	main_cursor.currline = firstline;
 
 	clock_t now = clock();
 
@@ -146,7 +161,7 @@ int main(int argc, char** argv)
 		// we can move all this stuff to a load file function
 		clear_doc(head);
 		load_doc(argv[1], &head, &tail);
-		currline = head;
+		main_cursor.currline = head;
 		find_labels(head);
 	}
 
@@ -154,12 +169,12 @@ int main(int argc, char** argv)
 	topline = head;
 
 	// initial cursor
-	int absx = xpos;
+	int absx = main_cursor.xpos;
 	if (show_line_no)
 		absx += 5;
 	
 	draw_lines(head, height - 1, screen_clean);
-	mvchgat(ypos + 1, absx, cursor_width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+	mvchgat(main_cursor.ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 	while(!exitFlag)
 	{
@@ -177,28 +192,36 @@ int main(int argc, char** argv)
 		case ERR:
 			break;
 
+		// Document contols
 		case CTRL('a'):		// save file
 		{
 			save_document();
 			break;
 		}
 
+		case CTRL('l'):		// load a file
+		{
+			load_document();
+			break;
+		}
+
+		// Cut/paste
 		case CTRL('k'):		// cut line
 		{
 			if (cut_line)
 				free(cut_line);
 			if (copy_line)
 				copy_line = NULL;
-			cut_line = currline;
-			docline* tmp = currline->nextline;
-			remove_line(currline, &head, &tail);
-			currline = tmp;
+			cut_line = main_cursor.currline;
+			docline* tmp = main_cursor.currline->nextline;
+			remove_line(main_cursor.currline, &head, &tail);
+			main_cursor.currline = tmp;
 			break;
 		}
 
 		case CTRL('x'):		// copy line
 		{
-			copy_line = currline;
+			copy_line = main_cursor.currline;
 			if (cut_line)
 				free(cut_line);
 			break;
@@ -217,47 +240,14 @@ int main(int argc, char** argv)
 				source = copy_line;
 			strncpy(newline->line, source->line, LINE_LENGTH);	// needs to be -1?
 
-			newline->nextline = currline;
-			newline->prevline = currline->prevline;
-			if (currline->prevline)
-				currline->prevline->nextline = newline;
-			currline->prevline = newline;
-			if (currline == head)
+			newline->nextline = main_cursor.currline;
+			newline->prevline = main_cursor.currline->prevline;
+			if (main_cursor.currline->prevline)
+				main_cursor.currline->prevline->nextline = newline;
+			main_cursor.currline->prevline = newline;
+			if (main_cursor.currline == head)
 				head = newline;
-			currline = newline;
-			break;
-		}
-
-		case CTRL('l'):		// load a file
-		{
-			memset(fname, 0, MAX_FILE_NAME);
-			if (!get_string("Load file", NULL, fname, MAX_FILE_NAME))
-				break;
-			set_debug_msg("Loading %s", fname);
-			if (check_file_exists(fname) == 0)
-			{
-				set_debug_msg("File not found");
-				break;
-			}
-			// TODO: Don't clear doc until we know
-			// file has loaded succesfully?
-			docline* tmp_head;
-
-			// return a value from load_doc. make load_doc take a temp head and if
-			// it succeeds, clear the old doc and set the new head to the temp head
-			if (load_doc(fname, &tmp_head, &tail) == -1)
-			{
-				set_debug_msg("Error loading %s", fname);
-				break;
-			}
-			clear_doc(head);
-			head = tmp_head;
-			find_labels(head);
-			currline = head;
-			topline = head;
-			draw_lines(head, height - 1, screen_clean);
-			set_debug_msg("Loaded %s", fname);
-			unsaved_changes = false;
+			main_cursor.currline = newline;
 			break;
 		}
 
@@ -268,20 +258,18 @@ int main(int argc, char** argv)
 
 		case KEY_SLEFT:
 		{
-			size_t oldxpos = xpos;
-			while (xpos > 0 && currline->line[xpos] == ' ') --xpos;
-			while (xpos > 0 && currline->line[xpos] != ' ') --xpos;
-			cursor_width = oldxpos - xpos;
+			size_t oldxpos = main_cursor.xpos;
+			while (main_cursor.xpos > 0 && main_cursor.currline->line[main_cursor.xpos] == ' ') --main_cursor.xpos;
+			while (main_cursor.xpos > 0 && main_cursor.currline->line[main_cursor.xpos] != ' ') --main_cursor.xpos;
 			break;
 		}
 
 		case KEY_SRIGHT:
 		{
-			size_t oldxpos = xpos;
-			linelen = strlen(currline->line);
-			while (xpos++ < linelen && currline->line[xpos] == ' ');
-			while (xpos++ < linelen && currline->line[xpos] != ' ');
-			cursor_width = xpos - oldxpos;
+			size_t oldxpos = main_cursor.xpos;
+			linelen = strlen(main_cursor.currline->line);
+			while (main_cursor.xpos++ < linelen && main_cursor.currline->line[main_cursor.xpos] == ' ');
+			while (main_cursor.xpos++ < linelen && main_cursor.currline->line[main_cursor.xpos] != ' ');
 			break;
 		}
 
@@ -297,43 +285,43 @@ int main(int argc, char** argv)
 			// Handle special case where we are at first character
 			// of the line, then we can just insert a new blank line before this
 			// one and not worry about the copy we're doing below.
-			if (xpos == 0)
-			{
-				// insert before
-				newline->prevline = currline->prevline;
-				newline->nextline = currline;
-				currline->prevline->nextline = newline;
-				currline->prevline = newline;
-				if (head == currline)
-					head = newline;
-				unsaved_changes = true;
-				++ypos;
-				++absy;
-				break;
-			}
+			// if (main_cursor.xpos == 0)
+			// {
+			// 	// insert before
+			// 	newline->prevline = main_cursor.currline->prevline;
+			// 	newline->nextline = main_cursor.currline;
+			// 	if (main_cursor.currline->prevline)
+			// 		main_cursor.currline->prevline->nextline = newline;
+			// 	main_cursor.currline->prevline = newline;
+			// 	if (head == main_cursor.currline)
+			// 		head = newline;
+			// 	unsaved_changes = true;
+			// 	++main_cursor.ypos;
+			// 	++absy;
+			// 	break;
+			// }
 			// if we get here, we aren't special case head of line
 			// so we have to move some chars down
 			int nindex = 0;
-			for (int i = xpos; i < strlen(currline->line); ++i)
+			for (int i = main_cursor.xpos; i < strlen(main_cursor.currline->line); ++i)
 			{
-				newline->line[nindex] = currline->line[i];
+				newline->line[nindex] = main_cursor.currline->line[i];
 				nindex++;
 			}
 			newline->line[nindex] = '\0';
-			// this is throwing seg faults now
-			for (int i = strlen(currline->line); i >= xpos ; --i)
+			for (int i = strlen(main_cursor.currline->line); i >= main_cursor.xpos ; --i)
 			{
-				currline->line[i] = '\0';
+				main_cursor.currline->line[i] = '\0';
 			}
-			newline->prevline = currline;
-			newline->nextline = currline->nextline;
-			currline->nextline = newline;
-			if (tail == currline)
+			newline->prevline = main_cursor.currline;
+			newline->nextline = main_cursor.currline->nextline;
+			main_cursor.currline->nextline = newline;
+			if (tail == main_cursor.currline)
 				tail = newline;
-			currline = newline;
+			main_cursor.currline = newline;
 			
-			xpos = 0;
-			++ypos;
+			main_cursor.xpos = 0;
+			++main_cursor.ypos;
 			++absy;
 			unsaved_changes = true;
 			break;
@@ -341,80 +329,25 @@ int main(int argc, char** argv)
 
 		case KEY_UP:
 		{
-			cursor_width = 1;
-			if (ypos == 0)
-			{
-				if (currline->prevline)
-				{
-					topline = topline->prevline;
-					currline = currline->prevline;
-					xpos = min(xpos, strlen(currline->line));
-					--toplineno;	
-					--absy;				
-				}
-			}
-			else if (currline->prevline)
-			{
-				currline = currline->prevline;
-				xpos = min(xpos, strlen(currline->line));
-				--ypos;
-				--absy;
-			}
+			cursor_up(&main_cursor);
 			break;
 		}
 
 		case KEY_DOWN:
 		{
-			cursor_width = 1;
-			if (ypos == height - 3)
-			{
-				if (currline->nextline)
-				{
-					topline = topline->nextline;
-					currline = currline->nextline;
-					xpos = min(xpos, strlen(currline->line));
-					++absy;
-					++toplineno;
-				}
-			}
-			else if (currline->nextline)
-			{
-				currline = currline->nextline;
-				xpos = min(xpos, strlen(currline->line));
-				++ypos;
-				++absy;
-			}
+			cursor_down(&main_cursor);
 			break;
 		}
 
 		case KEY_LEFT:
 		{
-			cursor_width = 1;
-			if (xpos == 0 && currline->prevline)
-			{
-				currline = currline->prevline;
-				--ypos;
-				--absy;
-				xpos = strlen(currline->line);
-			}
-			else if (xpos > 0)
-			{
-				xpos--;	
-			}
+			cursor_left(&main_cursor);
 			break;
 		}
 
 		case KEY_RIGHT:
 		{
-			cursor_width = 1;
-			xpos++;
-			if ((size_t)xpos > strlen(currline->line) && currline->nextline)
-			{
-				currline = currline->nextline;
-				++ypos;
-				++absy;
-				xpos = 0;
-			}
+			cursor_right(&main_cursor);
 			break;
 		}
 
@@ -440,91 +373,32 @@ int main(int argc, char** argv)
 
 		case KEY_BACKSPACE:
 		{
-			// TODO: We can combine backspace and delete probably!
-			if (xpos == 0)
-			{
-				// bring the line onto the one above
-				if (currline->prevline != NULL)
-				{
-					int lineindex = strlen(currline->prevline->line);
-					int newxpos = lineindex;
-					for (size_t i = 0; i < strlen(currline->line); ++i)
-					{
-						// error check this
-						currline->prevline->line[lineindex++] = currline->line[i];
-						if (lineindex >= 80) lineindex = 80;
-					}
-					docline* tmp = currline->prevline;
-					remove_line(currline, &head, &tail);
-					currline = tmp;
-					--ypos;
-					--absy;
-					xpos = newxpos;
-
-				}
-				// otherwise, we're the first line
-			}
-			else
-			{
-				xpos--;
-				for (int i = xpos; i < LINE_LENGTH; ++i)
-				{
-					currline->line[i] = currline->line[i + 1];
-				}
-			}
-			unsaved_changes = true;
+			cursor_left(&main_cursor);
+			remove_char(&main_cursor);
 			break;
 		}
 
 		case KEY_DC:
 		{
-			if (xpos == 0 && currline->line[0] == '\0')
-			{
-				if (currline == head && currline->nextline == NULL)
-				{
-					// empty document, nothing to do here
-					break;
-				}
-				docline* tmp;
-				if (currline == tail)
-				{
-					tmp = currline->prevline;
-					--ypos;
-					--absy;
-				}
-				else
-				{
-					tmp = currline->nextline;
-				}
-				remove_line(currline, &head, &tail);
-				currline = tmp;
-			}
-			else
-			{
-				for (int i = xpos; i < LINE_LENGTH; ++i)
-				{
-					currline->line[i] = currline->line[i + 1];
-				}
-			}
-			unsaved_changes = true;
+			remove_char(&main_cursor);
 			break;
 		}
 
 		case '\t':
 		{
 			// insert TAB_DISTANCE spaces
-			int tab_target = TAB_DISTANCE - (xpos % TAB_DISTANCE);
-			if (xpos + tab_target < LINE_LENGTH)
+			int tab_target = TAB_DISTANCE - (main_cursor.xpos % TAB_DISTANCE);
+			if (main_cursor.xpos + tab_target < LINE_LENGTH)
 			{
-				for (size_t i = LINE_LENGTH; i > xpos + tab_target; --i)
+				for (size_t i = LINE_LENGTH; i > main_cursor.xpos + tab_target; --i)
 				{
-					currline->line[i] = currline->line[i - tab_target];
+					main_cursor.currline->line[i] = main_cursor.currline->line[i - tab_target];
 				}
-				for (size_t i = xpos; i < xpos + tab_target; ++i)
+				for (size_t i = main_cursor.xpos; i < main_cursor.xpos + tab_target; ++i)
 				{
-					currline->line[i] = ' ';
+					main_cursor.currline->line[i] = ' ';
 				}
-				xpos += tab_target;
+				main_cursor.xpos += tab_target;
 				unsaved_changes = true;
 			}
 			break;
@@ -533,26 +407,26 @@ int main(int argc, char** argv)
 		default:	// a typable character
 		{
 			// if we're not inserting at back of line, make room
-			if (xpos != strlen(currline->line))
+			if (main_cursor.xpos != strlen(main_cursor.currline->line))
 			{
-				for (size_t i = LINE_LENGTH; i > xpos; --i)
+				for (size_t i = LINE_LENGTH; i > main_cursor.xpos; --i)
 				{
-					currline->line[i] = currline->line[i - 1];
+					main_cursor.currline->line[i] = main_cursor.currline->line[i - 1];
 				}
 
 			}
-			currline->line[xpos] = (char) ch;
-			xpos++;
+			main_cursor.currline->line[main_cursor.xpos] = (char) ch;
+			main_cursor.xpos++;
 			unsaved_changes = true;
 			break;
 		}
 		}
 
-		if (xpos > 1000)
+		if (main_cursor.xpos > 1000)
 			set_debug_msg("XPOS is big, error!");
-		if (xpos >= strlen(currline->line))
-			xpos = strlen(currline->line);
-		if (ypos > 1000)
+		if (main_cursor.xpos >= strlen(main_cursor.currline->line))
+			main_cursor.xpos = strlen(main_cursor.currline->line);
+		if (main_cursor.ypos > 1000)
 			set_debug_msg("YPOS is big, error!");
 
 		if (menuFlag)
@@ -572,13 +446,10 @@ int main(int argc, char** argv)
 
 			clear();
 			draw_lines(topline, height - 1, screen_clean);
-			absx = xpos;
+			absx = main_cursor.xpos;
 			if (show_line_no)
 				absx += 5;
-			// cursor_width won't be the best way to do this, ie what about beween
-			// lines? we need a START_CURSOR and END_CURSOR I guess?
-			// and we could have multi-carat support at some point as well!
-			mvchgat(ypos + 1, absx, cursor_width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+			mvchgat(main_cursor.ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 			if (had_input)
 			{
@@ -586,7 +457,7 @@ int main(int argc, char** argv)
 					changes = 'U';
 				else
 					changes = ' ';
-				mvprintw(0 , 0, "%d, %d %c ", (xpos + 1), (absy + 1), changes);
+				mvprintw(0 , 0, "%d, %d %c ", (main_cursor.xpos + 1), (absy + 1), changes);
 				mvprintw(0, width - 6, "%02d, %02d", height, width);
 				
 				if (current_filename)
@@ -630,6 +501,125 @@ cleanup_and_end:
 // functions that we need
 // delete 
 // insert char
+
+void remove_char(cursor_pos* cursor)
+{
+	// a few cases to consider when we delete a character
+	if (cursor->xpos == 0 && cursor->currline->line[0] == '\0')
+	{
+		if (cursor->currline == head && cursor->currline->nextline == NULL)
+		{
+			// empty document, nothing to do here
+			return;
+		}
+		docline* tmp;
+		if (cursor->currline == tail)
+		{
+			tmp = cursor->currline->prevline;
+			--cursor->ypos;
+			--absy;
+		}
+		else
+		{
+			tmp = cursor->currline->nextline;
+		}
+		remove_line(cursor->currline, &head, &tail);
+		cursor->currline = tmp;
+	}
+	else if (cursor->xpos == strlen(cursor->currline) && cursor->currline->nextline != NULL)
+	{
+
+		int lineindex = strlen(cursor->currline->line);
+		int newxpos = lineindex;
+		for (size_t i = 0; i < strlen(cursor->currline->nextline->line); ++i)
+		{
+			// error check this
+			cursor->currline->line[lineindex++] = cursor->currline->nextline->line[i];
+			if (lineindex >= 80) lineindex = 80;
+		}
+		remove_line(cursor->currline->nextline, &head, &tail);
+	}
+	else
+	{
+		for (int i = cursor->xpos; i < LINE_LENGTH; ++i)
+		{
+			cursor->currline->line[i] = cursor->currline->line[i + 1];
+		}
+	}
+	unsaved_changes = true;
+}
+
+void cursor_left(cursor_pos* cursor)
+{
+	if (cursor->xpos == 0 && cursor->currline->prevline)
+	{
+		cursor->currline = cursor->currline->prevline;
+		cursor->ypos -= 1;
+		--absy;
+		cursor->xpos = strlen(cursor->currline->line);
+	}
+	else if (cursor->xpos > 0)
+	{
+		cursor->xpos -= 1;	
+	}
+}
+
+void cursor_right(cursor_pos* cursor)
+{
+	cursor->xpos++;
+	if (cursor->xpos > strlen(cursor->currline->line) && cursor->currline->nextline)
+	{
+		cursor->currline = cursor->currline->nextline;
+		++cursor->ypos;
+		++absy;
+		cursor->xpos = 0;
+	}
+}
+
+void cursor_down(cursor_pos* cursor)
+{
+	if (cursor->ypos == height - 3)
+	{
+		if (cursor->currline->nextline)
+		{
+			topline = topline->nextline;
+			cursor->currline = cursor->currline->nextline;
+			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+			++absy;
+			++toplineno;
+		}
+	}
+	else if (cursor->currline->nextline)
+	{
+		cursor->currline = cursor->currline->nextline;
+		cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+		++cursor->ypos;
+		++absy;
+	}
+}
+
+void cursor_up(cursor_pos* cursor)
+{
+	if (cursor->ypos == 0)
+	{
+		if (cursor->currline->prevline)
+		{
+			topline = topline->prevline;
+			cursor->currline = cursor->currline->prevline;
+			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+			--toplineno;	
+			--absy;				
+		}
+	}
+	else if (cursor->currline->prevline)
+	{
+		cursor->currline = cursor->currline->prevline;
+		cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+		if (cursor->ypos > 0)
+			--cursor->ypos;
+		--absy;
+	}	
+}
 
 void set_debug_msg(const char* msg, ...)
 {
@@ -729,6 +719,40 @@ void save_document()
 	unsaved_changes = false;	
 }
 
+void load_document()
+{
+	memset(fname, 0, MAX_FILE_NAME);
+	if (!get_string("Load file", NULL, fname, MAX_FILE_NAME))
+		return;
+	set_debug_msg("Loading %s", fname);
+	if (check_file_exists(fname) == 0)
+	{
+		set_debug_msg("File not found");
+		return;
+	}
+	// TODO: Don't clear doc until we know
+	// file has loaded succesfully?
+	docline* tmp_head;
+
+	// return a value from load_doc. make load_doc take a temp head and if
+	// it succeeds, clear the old doc and set the new head to the temp head
+	if (load_doc(fname, &tmp_head, &tail) == -1)
+	{
+		set_debug_msg("Error loading %s", fname);
+		return;
+	}
+	clear_doc(head);
+	head = tmp_head;
+	find_labels(head);
+	main_cursor.currline = head;
+	topline = head;
+	main_cursor.xpos = 0;
+	main_cursor.ypos = 0;
+	draw_lines(head, height - 1, true);
+	set_debug_msg("Loaded %s", fname);
+	unsaved_changes = false;
+}
+
 // void get_text()
 // {
 // 	// here, we want to display a prompt
@@ -755,6 +779,8 @@ void save_document()
 // 	// ??
 // }
 
+
+// todo: move out of here?
 bool get_string(char* prompt, char* start, char* response, size_t max_size)
 {
 	// display prompt, with default text, and store reponse
@@ -835,7 +861,7 @@ void clear_doc(docline* head)
 
 void do_menu()
 {
-	printw("MENU...");
+	set_debug_msg("Menu...");
 	getch();
 }
 
