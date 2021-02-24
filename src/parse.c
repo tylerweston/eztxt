@@ -151,6 +151,8 @@ void parse_line(docline* line)
 		}
 
 		// this are is single quotes
+		// todo, maybe check that we only have a single char in here
+		// othewise, signal an error?
 		// give double quotes priority so we can use single quotes
 		// inside double quotes
 		if (ch == '\'' && !in_quotes && !in_single_quotes)

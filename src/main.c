@@ -11,22 +11,21 @@
 - command line options?
 - lots of bug fixes
 - unit tests
-
-*MAYBE TODO:*
-- undo/redo functions?
-- increase line limit from 80
-- look into using gap buffers to make editing text more efficient
-- regex/word search in document
-*/
-
-/*
-todo: 
+- command line param to turn off syntax highlighting?
 - start refactoring now
 - delete/backspace become same function
 - add menu in addition to shortcut keys
 - pressing CTRL or ALT breaks things?!
 - start writing unit tests using check!
-- change cursor into a cursorpos struct
+- change cursor into a cursorpos struct, then we can have multi-carat + wide selections
+*MAYBE TODO:*
+- undo/redo functions?
+- increase line limit from 80 to an arbitrary amount?
+- look into using gap buffers to make editing text more efficient
+- regex/word search in document (https://en.wikipedia.org/wiki/Boyer%E2%80%93Moore_string-search_algorithm)?
+- fuzzy-word search? (hard?)
+- open multiple documents?
+- mouse support? (https://tldp.org/HOWTO/NCURSES-Programming-HOWTO/mouse.html)?
 */
 
 char* current_filename = NULL;
@@ -45,13 +44,15 @@ void save_document();
 
 // GLOBALS: TODO: Get these outta here!
 size_t width, height;
-bool show_line_no = false;
+bool show_line_no = true;
+bool syntax_highlighting = true;
 size_t absy = 0;			// absolute-y position in document
 char fname[MAX_FILE_NAME];
 docline* currline;
 docline* head;
 docline* tail;
 bool unsaved_changes = false;
+size_t toplineno = 1;
 
 int main(int argc, char** argv)
 {
@@ -70,6 +71,7 @@ int main(int argc, char** argv)
 	bool exitFlag = false;
 	bool menuFlag = false;
 	size_t xpos = 0, ypos = 0;	// screen position
+
 	size_t cursor_width = 1;
 
 	bool had_input = false;
@@ -146,7 +148,6 @@ int main(int argc, char** argv)
 		load_doc(argv[1], &head, &tail);
 		currline = head;
 		find_labels(head);
-		draw_lines(head, height - 1, screen_clean);
 	}
 
 	// set topline here in case we loaded a file above
@@ -156,6 +157,8 @@ int main(int argc, char** argv)
 	int absx = xpos;
 	if (show_line_no)
 		absx += 5;
+	
+	draw_lines(head, height - 1, screen_clean);
 	mvchgat(ypos + 1, absx, cursor_width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 
 	while(!exitFlag)
@@ -345,7 +348,8 @@ int main(int argc, char** argv)
 				{
 					topline = topline->prevline;
 					currline = currline->prevline;
-					xpos = min(xpos, strlen(currline->line));	
+					xpos = min(xpos, strlen(currline->line));
+					--toplineno;	
 					--absy;				
 				}
 			}
@@ -370,6 +374,7 @@ int main(int argc, char** argv)
 					currline = currline->nextline;
 					xpos = min(xpos, strlen(currline->line));
 					++absy;
+					++toplineno;
 				}
 			}
 			else if (currline->nextline)
@@ -559,8 +564,11 @@ int main(int argc, char** argv)
 		if (!screen_clean)
 		{
 			// this will go somewhere else!
-			clear_labels();
-			find_labels(head);
+			if (syntax_highlighting)
+			{
+				clear_labels();
+				find_labels(head);
+			}
 
 			clear();
 			draw_lines(topline, height - 1, screen_clean);
@@ -661,33 +669,38 @@ void draw_lines(docline* top, int max_lines, bool clean)
 		move(yline, 0);
 		clrtoeol();
 		int clrval = 0;
-		parse_line(cur);
+		if (syntax_highlighting)
+			parse_line(cur);
 		bool first = true;
 		int absx = 0;
 		if (show_line_no)
 		{
 			attron(COLOR_PAIR(LINE_NO_PAIR));
 			// TODO: scrolling not supported yet for line numbers!
-			mvprintw(yline, 0, "%03d:", yline);
+			mvprintw(yline, 0, "%03d:", toplineno + yline - 1);	// eww. get rid of -1
 			attroff(COLOR_PAIR(LINE_NO_PAIR));
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
 		{
 			ch = cur->line[x];
-			if (!first)
+			if (syntax_highlighting)
 			{
-				attroff(clrval);
+				if (!first)
+				{
+					attroff(clrval);
+				}
+				first = false;
+				clrval = cur->formatting[x];
+				attron(clrval);
 			}
-			first = false;
-			clrval = cur->formatting[x];
-			attron(clrval);
 			if (show_line_no)
 				absx = x + 5;
 			else
 				absx = x;
 			mvprintw(yline, absx, "%c", ch);
 		}
-		attroff(clrval);
+		if (syntax_highlighting)
+			attroff(clrval);
 		yline++;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
