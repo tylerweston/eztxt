@@ -16,6 +16,8 @@
 #define MAX_RESPONSE_SIZE 36
 #define MAX_FILE_NAME 36
 
+#define MAX_CURSORS 8
+
 // maybe a system has already defined these?
 #ifndef CTRL
 #define CTRL(c) ((c) & 037)
@@ -59,3 +61,4 @@ extern char* current_filename;
 #define NUM_PAIR 10
 #define ERROR_PAIR 11
 #define LINE_NO_PAIR 12
+#define MACRO_PARAM_PAIR 13

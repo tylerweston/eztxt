@@ -11,9 +11,17 @@
 #define MAX_LABEL_LENGTH 36
 #define MAX_LABELS 100
 
+#define MAX_MACRO_LENGTH 36
+#define MAX_MACROS 100
+
 // TODO:
 // - hex coloring
 // - character literals
+
+
+// for storing macro names
+char seen_macros[MAX_MACROS][MAX_MACRO_LENGTH] = {0};
+int macros_seen = 0;
 
 // for storing labels
 char seen_labels[MAX_LABELS][MAX_LABEL_LENGTH] = {0};
@@ -29,7 +37,9 @@ bool is_pseudoinstruction(const char* token);
 int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
 bool is_num(const char* token);
 void add_label(const char* token);
+void add_macro(const char* token);
 bool is_label(const char* token);
+bool is_macro(const char* token);
 
 int init_parser()
 {
@@ -69,9 +79,15 @@ void clear_labels()
 	labels_seen = 0;
 }
 
+void clear_macros()
+{
+	macros_seen = 0;
+}
+
 void find_labels(docline* line)
 {
 	// should we clear here?
+	bool grab_macro_name = false;
 	char maybe_label[MAX_LABEL_LENGTH] = {0};
 	while (line)
 	{
@@ -83,15 +99,23 @@ void find_labels(docline* line)
 			ch = line->line[i];
 			if (ch == ' ' || ch == '\n' || 
 				ch == '\t' || ch == '(' ||
-				ch == '.' || ch == ')' ||
+				ch == ')' ||
 				ch == '\0')
 			{
 				// twice, clean it
-				if (maybe_label[curindex] != '\0')
-					maybe_label[curindex] = '\0';
+				maybe_label[curindex] = '\0';
 				if (maybe_label[curindex-1] == ':')
 				{
 					add_label(maybe_label);
+				}
+				if (grab_macro_name)
+				{
+					add_macro(maybe_label);
+					grab_macro_name = false;
+				}
+				if (strcmp(maybe_label, ".macro") == 0)
+				{
+					grab_macro_name = true;
 				}
 				curindex = 0;
 				maybe_label[0] = '\0';
@@ -108,6 +132,11 @@ void find_labels(docline* line)
 		{
 			add_label(maybe_label);
 		}
+		if (grab_macro_name && maybe_label[0] != '\0')
+		{
+			add_macro(maybe_label);
+			grab_macro_name = false;
+		}
 		line = line->nextline;
 	}
 }
@@ -123,6 +152,7 @@ void parse_line(docline* line)
 	bool in_comment = false;
 	bool in_register = false;
 	bool in_section = false;
+	bool in_macro_param = false;
 	attr_t to_assign;
 	for (size_t i = 0; i <= strlen(line->line); ++i)
 	{
@@ -177,6 +207,9 @@ void parse_line(docline* line)
 		if (ch == '$')
 			in_register = true;
 
+		if (ch == '%')
+			in_macro_param = true;
+
 		if (ch == ' ' || ch == '\t' || ch == '\0' || ch == '\n')
 		{
 			line->formatting[i] = 0;
@@ -191,6 +224,12 @@ void parse_line(docline* line)
 			in_register = false;
 			in_section = false;
 			goto got_token;
+		}
+
+		if (in_macro_param)
+		{
+			line->formatting[i] = COLOR_PAIR(MACRO_PARAM_PAIR);
+			continue;
 		}
 
 		if (in_section)
@@ -221,11 +260,11 @@ got_token:
 		}
 		else if (is_pseudoinstruction(token))
 		{
-			to_assign = A_BOLD | A_UNDERLINE;
+			to_assign = A_BOLD /*| A_UNDERLINE*/;
 		}
 		else if (is_keyword(token))
 		{
-			to_assign = A_BOLD;
+			to_assign = COLOR_PAIR(KEYWORD_PAIR);
 		}
 		else if (is_num(token))
 		{
@@ -234,6 +273,10 @@ got_token:
 		else if (is_label(token))
 		{
 			to_assign = COLOR_PAIR(LABEL_PAIR);
+		}
+		else if (is_macro(token))
+		{
+			to_assign = COLOR_PAIR(MACRO_PARAM_PAIR);
 		}
 
 		if (to_assign!= 0)
@@ -262,12 +305,31 @@ void add_label(const char* token)
 	labels_seen++;
 }
 
+void add_macro(const char* token)
+{
+	strncpy( seen_macros[macros_seen], token, strlen(token));
+	macros_seen++;
+}
+
 bool is_label(const char* token)
 {
 	for (int i = 0; i < labels_seen; ++i)
 	{
 		// segfault is here
 		if (strcmp(token, seen_labels[i]) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool is_macro(const char* token)
+{
+	for (int i = 0; i < macros_seen; ++i)
+	{
+		// segfault is here
+		if (strcmp(token, seen_macros[i]) == 0)
 		{
 			return true;
 		}

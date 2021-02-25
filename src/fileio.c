@@ -19,6 +19,8 @@ int load_doc(const char* filename, docline** head, docline** tail)
 	char ch;
 	int linelen = 0;
 	docline* currline = calloc(1, sizeof(docline));
+	currline->prevline = NULL;
+	currline->nextline = NULL;
 	if (currline== NULL)
 	{
 		return -1;
