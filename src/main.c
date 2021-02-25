@@ -5,7 +5,10 @@
 
 /*
 *TODO:*
-- try to load file with unsaved changes, prompt for save first
+- dynamic leading 0s based on # of lines
+- newline on last line should scroll down
+- deleting on first line should scroll up
+- rename dir/repo
 - insert action (action type, location, character?)
 - left/right scrolling
 - command line options? -line nums, syntax highlighting
@@ -25,43 +28,52 @@
 - mouse support? (https://tldp.org/HOWTO/NCURSES-Programming-HOWTO/mouse.html)?
 */
 
+static bool get_string(char* prompt, char* start, char* response, size_t max_size);	// make this also immediate get one char? ie Y or N button
+static void cleanup_and_end();
 
+// void do_menu();
 
-void set_debug_msg(const char* msg, ...);
-void draw_lines(docline*, int, bool);
-void remove_line(docline* line, docline** head, docline** tail);
-void clear_doc(docline* head);
-void do_menu();
-void parse_line(docline* line);
-int align_tab(int num);
-bool get_string(char* prompt, char* start, char* response, size_t max_size);
-void check_unsaved_changes();
+// document functions
+static void check_unsaved_changes();
+static void load_document();
+static void save_document();
+static void initialize_doc();
 
-void load_document();
-void save_document();
+// line editing
+static void draw_lines(docline*);
+static void remove_line(docline* line, docline** head, docline** tail);
+static void clear_doc(docline* head);
 
-void draw_cursors();
+static void draw_cursors();
 
 // cursor movements
-void cursor_left(cursor_pos* cursor);
-void cursor_right(cursor_pos* cursor);
-void cursor_up(cursor_pos* cursor);
-void cursor_down(cursor_pos* cursor);
+static void cursor_left(cursor_pos* cursor);
+static void cursor_right(cursor_pos* cursor);
+static void cursor_up(cursor_pos* cursor);
+static void cursor_down(cursor_pos* cursor);
 
 // cursor actions
-void remove_char(cursor_pos* cursor);
-void insert_newline(cursor_pos* cursor);
-void insert_tab(cursor_pos* cursor);
-void insert_character(cursor_pos* cursor, char ch);
+static void remove_char(cursor_pos* cursor);
+static void insert_newline(cursor_pos* cursor);
+static void insert_tab(cursor_pos* cursor);
+static void insert_character(cursor_pos* cursor, char ch);
 
-// GLOBALS: TODO: Get these outta here! 
+static void set_leading_zeros();
+
+// GLOBALS: TODO: Get these outta here!
 size_t width, height;
 size_t absy = 0;			// absolute-y position in document
 char fname[MAX_FILE_NAME];
-docline* currline;
-docline* head;
-docline* tail;
+docline* currline = NULL;
+docline* head = NULL;
+docline* tail = NULL;
+docline* copy_line = NULL;
+docline* cut_line = NULL;
 bool unsaved_changes = false;
+
+int est_number_lines = 1;
+int leading_zeros = 0;
+
 
 // these will become command line options
 bool show_line_no = true;
@@ -79,6 +91,9 @@ char* current_filename = NULL;
 char debug_msg[MAX_DEBUG_MSG];
 int debug_countdown = 0;
 
+bool had_input = false;
+bool exitFlag = false;
+
 int main(int argc, char** argv)
 {
 	initscr();
@@ -88,27 +103,27 @@ int main(int argc, char** argv)
 		printw("No color terminal found, exiting.");
 		printw("Press a key to exit...");
 		getch();
-		goto cleanup_and_end;	
+		cleanup_and_end();
 	}
 
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
-	bool exitFlag = false;
-	bool menuFlag = false;
 
-	cursors[0].xpos = 0;
-	cursors[0].ypos = 0;
+	// bool menuFlag = false;
 
-	bool had_input = false;
+	// cursors[0].xpos = 0;
+	// cursors[0].ypos = 0;
+
+	// bool had_input = false;
+	// bool exitFlag = false;
 
 	size_t linelen;
 	bool screen_clean = true;
 
 	char changes;
 
-
-	docline* copy_line = NULL;
-	docline* cut_line = NULL;
+	// docline* copy_line = NULL;
+	// docline* cut_line = NULL;
 
 	cbreak();
 	noecho();
@@ -129,6 +144,7 @@ int main(int argc, char** argv)
 	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
 	init_pair(NUM_PAIR, COLOR_CYAN, -1);
 	init_pair(ERROR_PAIR, COLOR_RED, -1);
+	init_pair(ERROR_BLOCK_PAIR, -1, COLOR_RED);
 	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
 	init_pair(MACRO_PARAM_PAIR, COLOR_YELLOW, -1);
 
@@ -142,27 +158,28 @@ int main(int argc, char** argv)
 			printw("Can't read pinstrs.dat\n");
 		printw("Press a key to exit...");
 		getch();
-		goto cleanup_and_end;		
+		cleanup_and_end();
 	}
 
-	mvprintw(0, 0, "eztxt %d.%d - Tyler Weston - F12 exits - %s", 
-		MAJOR_VERSION, MINOR_VERSION, curses_version());
-	mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
+	mvprintw(0, 0, "mipze ver.%d.%d.%d - Tyler Weston - F12 exits - %s",
+	         MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION, curses_version());
+	mvchgat(0, 0, -1, 0, BAR_PAIR, NULL);
 	refresh();
 
 	getmaxyx(stdscr, height, width);
 
-	// document lines doubly linked list
-	docline* firstline = calloc(1, sizeof(docline));
-	firstline->prevline = NULL;
-	firstline->nextline = NULL;
+	// // document lines doubly linked list
+	// docline* firstline = calloc(1, sizeof(docline));
+	// firstline->prevline = NULL;
+	// firstline->nextline = NULL;
 
-	head = firstline;
-	tail = firstline;
-	cursors[0].currline = firstline;
+	// head = firstline;
+	// tail = firstline;
+	// cursors[0].currline = firstline;
 
 	clock_t now = clock();
 
+	initialize_doc();
 	// TODO: Parse command line here
 	if (argc != 1 && check_file_exists(argv[1]))
 	{
@@ -176,23 +193,18 @@ int main(int argc, char** argv)
 	// set topline here in case we loaded a file above
 	topline = head;
 
-	// initial cursor
-	int absx = cursors[0].xpos;
-	if (show_line_no)
-		absx += 5;
-	
-	draw_lines(head, height - 1, screen_clean);
-	mvchgat(cursors[0].ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+	draw_lines(head);
+	draw_cursors();
 
-	while(!exitFlag)
+	while (!exitFlag)
 	{
 
 		screen_clean = true;
 		ch = getch();
-		if (ch!=ERR) {
+		if (ch != ERR) {
 			had_input = true;
 			screen_clean = false;
-		} 
+		}
 
 		switch (ch)
 		{
@@ -211,6 +223,14 @@ int main(int argc, char** argv)
 		{
 			check_unsaved_changes();
 			load_document();
+			break;
+		}
+
+		case CTRL('n'):		// new document
+		{
+			check_unsaved_changes();
+			clear_doc(head);
+			initialize_doc();
 			break;
 		}
 
@@ -266,49 +286,30 @@ int main(int argc, char** argv)
 		// 	break;
 
 		case CTRL('y'): // new carat up
-			set_debug_msg("multicarat up");
 			if (num_cursors == MAX_CURSORS)
 				break;
 			cursors[num_cursors].xpos = cursors[0].xpos;
 			cursors[num_cursors].ypos = cursors[0].ypos;
-			set_debug_msg("nx: %d ny: %d", cursors[num_cursors].xpos, cursors[num_cursors].ypos);
 			cursors[num_cursors].currline = cursors[0].currline;
 			cursor_up(&cursors[0]);
-			if (cursors[num_cursors].xpos == cursors[0].xpos && 
-				cursors[num_cursors].ypos == cursors[0].ypos)
-			{
-				set_debug_msg("nvm carat up");
-				// nvm, we couldn't actually make a new cursor
-			}
-			else
-			{
+			if (!(cursors[num_cursors].xpos == cursors[0].xpos &&
+			        cursors[num_cursors].ypos == cursors[0].ypos))
 				++num_cursors;
-				set_debug_msg("carated up! %d", num_cursors);
-			}
 			break;
 
 		case CTRL('h'):	// new carat down
-			set_debug_msg("multicarat down");
 			if (num_cursors == MAX_CURSORS)
 				break;
 			cursors[num_cursors].xpos = cursors[0].xpos;
 			cursors[num_cursors].ypos = cursors[0].ypos;
 			cursors[num_cursors].currline = cursors[0].currline;
 			cursor_down(&cursors[0]);
-			if (cursors[num_cursors].xpos == cursors[0].xpos && 
-				cursors[num_cursors].ypos == cursors[0].ypos)
-			{
-				// nvm, we couldn't actually make a new cursor
-				set_debug_msg("nvm carat down");
-			}
-			else
-			{
+			if (!(cursors[num_cursors].xpos == cursors[0].xpos &&
+			        cursors[num_cursors].ypos == cursors[0].ypos))
 				++num_cursors;
-			}
 			break;
 
 		case CTRL('u'): // remove extra carats
-			set_debug_msg("remove extra carats");
 			num_cursors = 1;
 			break;
 
@@ -379,23 +380,16 @@ int main(int argc, char** argv)
 		case ESC:		// exit, check for unsaved changes
 		case KEY_F(12):
 		{
-			// if (unsaved_changes)
-			// {
-			// char sure[2];
-			// get_string ("You have unsaved changes, save?(Y/n)", NULL, sure, 1);
-			// if ((sure[0] == 'Y' || sure[0] == 'y'))
-			// 	save_document();			
-			// }
 			check_unsaved_changes();
 			exitFlag = true;
 			break;
 		}
 
-		case KEY_F(2):
-		{
-			menuFlag = true;
-			break;
-		}
+		// case KEY_F(2):
+		// {
+		// 	menuFlag = true;
+		// 	break;
+		// }
 
 		case KEY_BACKSPACE:
 		{
@@ -416,21 +410,6 @@ int main(int argc, char** argv)
 
 		case '\t':
 		{
-			// // insert TAB_DISTANCE spaces
-			// int tab_target = TAB_DISTANCE - (main_cursor.xpos % TAB_DISTANCE);
-			// if (main_cursor.xpos + tab_target < LINE_LENGTH)
-			// {
-			// 	for (size_t i = LINE_LENGTH; i > main_cursor.xpos + tab_target; --i)
-			// 	{
-			// 		main_cursor.currline->line[i] = main_cursor.currline->line[i - tab_target];
-			// 	}
-			// 	for (size_t i = main_cursor.xpos; i < main_cursor.xpos + tab_target; ++i)
-			// 	{
-			// 		main_cursor.currline->line[i] = ' ';
-			// 	}
-			// 	main_cursor.xpos += tab_target;
-			// 	unsaved_changes = true;
-			// }
 			for (int i = 0; i < num_cursors; ++i)
 				insert_tab(&cursors[i]);
 			break;
@@ -438,39 +417,17 @@ int main(int argc, char** argv)
 
 		default:	// a typable character
 		{
-			// // if we're not inserting at back of line, make room
-			// if (main_cursor.xpos != strlen(main_cursor.currline->line))
-			// {
-			// 	for (size_t i = LINE_LENGTH; i > main_cursor.xpos; --i)
-			// 	{
-			// 		main_cursor.currline->line[i] = main_cursor.currline->line[i - 1];
-			// 	}
-
-			// }
-			// main_cursor.currline->line[main_cursor.xpos] = (char) ch;
-			// main_cursor.xpos++;
-			// unsaved_changes = true;
 			for (int i = 0; i < num_cursors; ++i)
 				insert_character(&cursors[i], (char) ch);
 			break;
 		}
 		}
 
-		// // these are debug messages to check for underflow since we're using unsigned int
-		// // for cursor position, if we ever have an enormous x or ypos, assume we've done
-		// // something naughty
-		// if (main_cursor.xpos > 1000)
-		// 	set_debug_msg("XPOS is big, error!");
-		// if (main_cursor.xpos >= strlen(main_cursor.currline->line))
-		// 	main_cursor.xpos = strlen(main_cursor.currline->line);
-		// if (main_cursor.ypos > 1000)
-		// 	set_debug_msg("YPOS is big, error!");
-
-		if (menuFlag)
-		{
-			// not implemented yet
-			// do_menu();
-		}
+		// if (menuFlag)
+		// {
+		// 	// not implemented yet
+		// 	// do_menu();
+		// }
 
 		if (!screen_clean)
 		{
@@ -483,7 +440,7 @@ int main(int argc, char** argv)
 			}
 
 			clear();
-			draw_lines(topline, height - 1, screen_clean);
+			draw_lines(topline);
 			draw_cursors();
 
 			if (had_input)	// just so we can show the title bar until a key is pressed? find a better way.
@@ -494,7 +451,7 @@ int main(int argc, char** argv)
 					changes = ' ';
 				mvprintw(0 , 0, "%d, %d %c ", (cursors[0].xpos + 1), (absy + 1), changes);
 				mvprintw(0, width - 6, "%02d, %02d", height, width);
-				
+
 				if (current_filename)
 					mvprintw(0, (width - strlen(current_filename) - 6) / 2, "eztxt - %s", current_filename);
 				else
@@ -506,17 +463,17 @@ int main(int argc, char** argv)
 		if (debug_countdown > 1)
 		{
 			mvprintw(height - 1, 0, "%s", debug_msg);
-		} 
+		}
 		else if (debug_countdown == 1)
 		{
-			move(height-1, 0);
+			move(height - 1, 0);
 			clrtoeol();
 		}
 
 		mvprintw(height - 1, width - 15, "cpu: %.2fGHz", avg_cpu_mhz);
 
 		// screen update
-		if (clock() - now > 500000)
+		if (clock() - now > 250000)
 		{
 			now = clock();
 			avg_cpu_mhz = cpu_info();
@@ -526,8 +483,11 @@ int main(int argc, char** argv)
 			}
 		}
 	}
+	cleanup_and_end();
+}
 
-cleanup_and_end:
+void cleanup_and_end()
+{
 	clear_doc(head);
 	endwin();
 	exit(EXIT_SUCCESS);
@@ -542,18 +502,18 @@ void draw_cursors()
 		if (show_line_no)
 			absx += 5;
 		mvchgat(cursors[i].ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
-	}	
+	}
 }
 
 void check_unsaved_changes()
 {
 	if (unsaved_changes)
 	{
-	char sure[2];
-	get_string ("You have unsaved changes, save?(Y/n)", NULL, sure, 1);
-	if ((sure[0] == 'Y' || sure[0] == 'y'))
-		save_document();			
-	}	
+		char sure[2];
+		get_string ("You have unsaved changes, save?(Y/n)", NULL, sure, 1);
+		if ((sure[0] == 'Y' || sure[0] == 'y'))
+			save_document();
+	}
 }
 
 void insert_tab(cursor_pos* cursor)
@@ -618,18 +578,21 @@ void insert_newline(cursor_pos* cursor)
 		unsaved_changes = true;
 		++cursor->ypos;
 		++absy;
+		//cursor_down(cursor);
+		++est_number_lines;
+		set_leading_zeros();
 		return;
 	}
 	// if we get here, we aren't special case head of line
 	// so we have to move some chars down
 	int nindex = 0;
-	for (int i = cursor->xpos; i < strlen(cursor->currline->line); ++i)
+	for (size_t i = cursor->xpos; i < strlen(cursor->currline->line); ++i)
 	{
 		newline->line[nindex] = cursor->currline->line[i];
 		nindex++;
 	}
 	newline->line[nindex] = '\0';
-	for (int i = strlen(cursor->currline->line); i >= cursor->xpos ; --i)
+	for (size_t i = strlen(cursor->currline->line); i >= cursor->xpos ; --i)
 	{
 		cursor->currline->line[i] = '\0';
 	}
@@ -639,12 +602,14 @@ void insert_newline(cursor_pos* cursor)
 	if (tail == cursor->currline)
 		tail = newline;
 	cursor->currline = newline;
-	
+
 	cursor->xpos = 0;
 	++cursor->ypos;
 	++absy;
+	//cursor_down(cursor);
 	unsaved_changes = true;
-
+	++est_number_lines;
+	set_leading_zeros();
 }
 
 void remove_char(cursor_pos* cursor)
@@ -707,13 +672,14 @@ void cursor_left(cursor_pos* cursor)
 	}
 	else if (cursor->xpos > 0)
 	{
-		cursor->xpos -= 1;	
+		cursor->xpos -= 1;
 	}
 }
 
 void cursor_right(cursor_pos* cursor)
 {
-	cursor->xpos++;
+	if (cursor->xpos <= strlen(cursor->currline->line))
+		cursor->xpos++;
 	if (cursor->xpos > strlen(cursor->currline->line) && cursor->currline->nextline)
 	{
 		cursor->currline = cursor->currline->nextline;
@@ -754,8 +720,8 @@ void cursor_up(cursor_pos* cursor)
 			topline = topline->prevline;
 			cursor->currline = cursor->currline->prevline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			--toplineno;	
-			--absy;				
+			--toplineno;
+			--absy;
 		}
 	}
 	else if (cursor->currline->prevline)
@@ -765,7 +731,7 @@ void cursor_up(cursor_pos* cursor)
 		if (cursor->ypos > 0)
 			--cursor->ypos;
 		--absy;
-	}	
+	}
 }
 
 void set_debug_msg(const char* msg, ...)
@@ -784,6 +750,8 @@ void remove_line(docline* line, docline** head, docline** tail)
 {
 	if (*head == *tail && *head == line)
 		return;
+	--est_number_lines;
+	set_leading_zeros();
 	if (*head == line)
 		*head = line->nextline;
 	if (*tail == line)
@@ -794,14 +762,14 @@ void remove_line(docline* line, docline** head, docline** tail)
 		line->prevline->nextline = line->nextline;
 }
 
-void draw_lines(docline* top, int max_lines, bool clean)
+void draw_lines(docline* top)
 {
-	// if (clean) 
-	// 	return;
+	int max_lines = height - 1;
 	docline* cur = top;
 	int yline = 1;
 	char ch;
-	do 
+	char line_label[8];
+	do
 	{
 		move(yline, 0);
 		clrtoeol();
@@ -814,7 +782,10 @@ void draw_lines(docline* top, int max_lines, bool clean)
 		{
 			attron(COLOR_PAIR(LINE_NO_PAIR));
 			// todo: make %03 dynamic so it won't print leading 0s unless it needs to?
-			mvprintw(yline, 0, "%03d:", toplineno + yline - 1);	// -1 due to 0 indexed arrays
+			set_debug_msg("lz: %d   ", leading_zeros);
+			// sprintf(line_label, "%0*lu:", leading_zeros, toplineno + yline - 1);
+			//mvprintw(yline, 0, line_label);	// -1 due to 0 indexed arrays
+			mvprintw(yline, 0, "%0*lu:", leading_zeros, toplineno + yline - 1);
 			attroff(COLOR_PAIR(LINE_NO_PAIR));
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
@@ -863,7 +834,7 @@ void save_document()
 		free(current_filename);
 	current_filename = strdup(fname);
 	set_debug_msg("Saved %s", fname);
-	unsaved_changes = false;	
+	unsaved_changes = false;
 }
 
 void load_document()
@@ -872,33 +843,50 @@ void load_document()
 	if (!get_string("Load file", NULL, fname, MAX_FILE_NAME))
 		return;
 	set_debug_msg("Loading %s", fname);
+
 	if (check_file_exists(fname) == 0)
 	{
 		set_debug_msg("File not found");
 		return;
 	}
+
 	// TODO: Don't clear doc until we know
 	// file has loaded succesfully?
 	docline* tmp_head;
 
 	// return a value from load_doc. make load_doc take a temp head and if
 	// it succeeds, clear the old doc and set the new head to the temp head
-	if (load_doc(fname, &tmp_head, &tail) == -1)
+	int est_number_lines = load_doc(fname, &tmp_head, &tail); 
+	if (est_number_lines == -1)
 	{
 		set_debug_msg("Error loading %s", fname);
+		est_number_lines = 1;
 		return;
 	}
+
 	clear_doc(head);
 	head = tmp_head;
 	find_labels(head);
 	cursors[0].currline = head;
 	topline = head;
 	cursors[0].xpos = 0;
-	cursors[0].ypos = 0;\
+	cursors[0].ypos = 0;
 	num_cursors = 1;
-	draw_lines(head, height - 1, true);
+	set_leading_zeros();
+	draw_lines(head);
 	set_debug_msg("Loaded %s", fname);
 	unsaved_changes = false;
+}
+
+void wait_for_keypress()
+{
+	wchar_t ch;
+	for (;;)
+	{
+		ch = getch();
+		if (ch != ERR)
+			break;
+	}
 }
 
 // todo: move out of here?
@@ -908,7 +896,7 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 	// in response. return false is user presses escape, ie. no input
 	// clear any existing debug message
 	set_debug_msg("");
-	move(height-1, 0);
+	move(height - 1, 0);
 	clrtoeol();
 	printw("%s: ", prompt);
 	char resp[max_size + 1];
@@ -927,7 +915,7 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 	{
 		if (display)
 		{
-			move(height-1, strlen(prompt) + 2);
+			move(height - 1, strlen(prompt) + 2);
 			clrtoeol();
 			printw("%s_", resp);
 			display = false;
@@ -952,7 +940,7 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 			*response = 0;
 			return false;
 		default:
-			if (!(isdigit(ch) || isalpha(ch) || ispunct(ch)))
+			if (!(isdigit(ch) || isalpha(ch) || ispunct(ch) || ch == ' '))
 				break;
 			if (resp_index == max_size)
 				break;
@@ -966,6 +954,32 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 	return true;
 }
 
+void initialize_doc()
+{
+	// create a new empty document
+	exitFlag = false;
+
+	copy_line = NULL;
+	cut_line = NULL;
+
+	// create a single empty line to begin with
+	// document lines doubly linked list
+	docline* firstline = calloc(1, sizeof(docline));
+	firstline->prevline = NULL;
+	firstline->nextline = NULL;
+
+	head = firstline;
+	tail = firstline;
+
+	cursors[0].currline = head;
+	topline = head;
+	cursors[0].xpos = 0;
+	cursors[0].ypos = 0;
+	num_cursors = 1;
+
+	set_leading_zeros();
+}
+
 void clear_doc(docline* head)
 {
 	// free all memory used by a document
@@ -976,13 +990,31 @@ void clear_doc(docline* head)
 		free(head);
 		head = tmp;
 	}
+	num_cursors = 0;
 }
 
-
-
-void do_menu()
+void set_leading_zeros()
 {
-	set_debug_msg("Menu...");
-	getch();
+
+	if (est_number_lines < 10)
+		leading_zeros = 0;
+	else if (est_number_lines < 100)
+		leading_zeros = 1;
+	else if (est_number_lines < 1000)
+		leading_zeros = 2;
+	else if (est_number_lines < 10000)
+		leading_zeros = 3;
+	else
+		leading_zeros = 4;
+	// if we have bigger docs, we're in trouble
+	set_debug_msg("setting leading zeros: %d", leading_zeros);
 }
+
+
+
+// void do_menu()
+// {
+// 	set_debug_msg("Menu...");
+// 	getch();
+// }
 

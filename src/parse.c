@@ -94,17 +94,18 @@ void find_labels(docline* line)
 		maybe_label[0] = '\0';
 		size_t curindex = 0;
 		char ch;
-		for (size_t i = 0; i <strlen(line->line); ++i)
+		for (size_t i = 0; i < strlen(line->line); ++i)
 		{
 			ch = line->line[i];
-			if (ch == ' ' || ch == '\n' || 
-				ch == '\t' || ch == '(' ||
-				ch == ')' ||
-				ch == '\0')
+			if (ch == ' ' || ch == '\n' ||
+			        ch == '\t' || ch == '(' ||
+			        ch == ')' ||
+			        ch == '\0')
 			{
 				// twice, clean it
-				maybe_label[curindex] = '\0';
-				if (maybe_label[curindex-1] == ':')
+				if (maybe_label[curindex] != '\0')
+					maybe_label[curindex] = '\0';
+				if (maybe_label[curindex - 1] == ':')
 				{
 					add_label(maybe_label);
 				}
@@ -128,7 +129,7 @@ void find_labels(docline* line)
 		// twice, clean it
 		if (maybe_label[curindex] != '\0')
 			maybe_label[curindex] = '\0';
-		if (maybe_label[curindex-1] == ':')
+		if (maybe_label[curindex - 1] == ':')
 		{
 			add_label(maybe_label);
 		}
@@ -140,7 +141,6 @@ void find_labels(docline* line)
 		line = line->nextline;
 	}
 }
-
 
 void parse_line(docline* line)
 {
@@ -197,7 +197,14 @@ void parse_line(docline* line)
 
 		if (in_quotes || in_single_quotes)
 		{
-			line->formatting[i] = COLOR_PAIR(QUOTE_PAIR);
+			if (i == strlen(line->line) - 1)
+			{
+				line->formatting[i] = COLOR_PAIR(ERROR_BLOCK_PAIR);
+			}
+			else
+			{
+				line->formatting[i] = COLOR_PAIR(QUOTE_PAIR);
+			}
 			continue;
 		}
 
@@ -234,7 +241,7 @@ void parse_line(docline* line)
 
 		if (in_section)
 		{
-			line->formatting[i] = COLOR_PAIR(SECTION_PAIR)  | A_BOLD;
+			line->formatting[i] = COLOR_PAIR(SECTION_PAIR);
 			continue;
 		}
 
@@ -279,12 +286,12 @@ got_token:
 			to_assign = COLOR_PAIR(MACRO_PARAM_PAIR);
 		}
 
-		if (to_assign!= 0)
+		if (to_assign != 0)
 		{
 			for (size_t j = start_index; j < i; ++j)
 			{
 				line->formatting[j] = to_assign;
-			}	
+			}
 		}
 		// reset everything
 		start_index = -1;
@@ -339,6 +346,7 @@ bool is_macro(const char* token)
 
 bool is_keyword(const char* token)
 {
+	// make char is upper function
 	char* uppertoken = strdup(token);
 	char ch;
 	for (size_t i = 0; i < strlen(uppertoken); ++i)

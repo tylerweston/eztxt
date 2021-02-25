@@ -3,13 +3,13 @@ OBJ_DIR := obj
 BIN_DIR := .
 CC := gcc
 
-EXE := ./eztxt
+EXE := ./mipsze
 
 SRC := $(wildcard $(SRC_DIR)/*.c)
 OBJ := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 CPPFLAGS := -Iinclude -MMD -MP
-CFLAGS := -pedantic -Wall -Wextra -Wfloat-equal -std=gnu99 -g
+CFLAGS := -Wall -Wextra -Wfloat-equal -Wunreachable-code -std=gnu99 -g -O
 LDLIBS := -lncurses
 
 .PHONY: all

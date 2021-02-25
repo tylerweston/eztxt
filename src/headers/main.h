@@ -7,7 +7,8 @@
 #include <ctype.h>
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 2
+#define MINOR_VERSION 1
+#define BUILD_VERSION 3
 
 #define TAB_DISTANCE 4
 #define LINE_LENGTH 80
@@ -15,7 +16,6 @@
 #define DISPLAY_DEBUG_TIME 10
 #define MAX_RESPONSE_SIZE 36
 #define MAX_FILE_NAME 36
-
 #define MAX_CURSORS 8
 
 // maybe a system has already defined these?
@@ -30,6 +30,8 @@
 	({ __typeof__ (a) _a = (a); \
 	__typeof__ (b) _b = (b);     \
 	_a < _b ? _a : _b; }          )
+
+ // #define min(X,Y) ((X) < (Y) ? : (X) : (Y))
 
 typedef struct docline 
 {
@@ -60,5 +62,10 @@ extern char* current_filename;
 #define LABEL_PAIR 9
 #define NUM_PAIR 10
 #define ERROR_PAIR 11
-#define LINE_NO_PAIR 12
-#define MACRO_PARAM_PAIR 13
+#define ERROR_BLOCK_PAIR 12
+#define LINE_NO_PAIR 13
+#define MACRO_PARAM_PAIR 14
+
+// allow other function to set debug messages
+void set_debug_msg(const char* msg, ...);
+void wait_for_keypress();;

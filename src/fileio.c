@@ -7,6 +7,7 @@
 
 int load_doc(const char* filename, docline** head, docline** tail)
 {
+	int num_lines = 1;
 	FILE *fptr = fopen(filename, "r");
 	if (fptr == NULL)
 	{
@@ -21,12 +22,12 @@ int load_doc(const char* filename, docline** head, docline** tail)
 	docline* currline = calloc(1, sizeof(docline));
 	currline->prevline = NULL;
 	currline->nextline = NULL;
-	if (currline== NULL)
+	if (currline == NULL)
 	{
 		return -1;
 	}
 	*head = currline;
-	for(;;)
+	for (;;)
 	{
 		ch = fgetc(fptr);
 		if (feof(fptr))
@@ -43,6 +44,7 @@ int load_doc(const char* filename, docline** head, docline** tail)
 			currline = calloc(1, sizeof(docline));
 			currline->prevline = lastline;
 			lastline->nextline = currline;
+			++num_lines;
 		}
 		else if (ch == '\t')
 		{
@@ -60,7 +62,7 @@ int load_doc(const char* filename, docline** head, docline** tail)
 		}
 	}
 	fclose(fptr);
-	return 0;
+	return num_lines;
 }
 
 int check_file_exists(const char* filename)
