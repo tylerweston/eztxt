@@ -9,5 +9,5 @@ To open a file for editing: `./eztxt filename.ext`
 compiled and tested with: `gcc v10.2.0` and `GNU make 4.1` on `ubuntu 16.04`. Tested with `Byobu terminal`, `XTerm`, and `GNOME terminal`.
 
 <p align="center">
-  <img src="https://github.com/tylerweston/eztxt/blob/main/eztxtscreenshot.jpg?raw=true" />
+  <img src="https://github.com/tylerweston/eztxt/blob/main/mipszescreenshot.png?raw=true" />
 </p>
