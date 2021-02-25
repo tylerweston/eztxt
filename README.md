@@ -1,6 +1,19 @@
-# eztxt  
+# mipsze  
 A small prototype text editor with syntax highlighting for mips assembly that will eventually be rolled into mips2c to create a mips ide and emulator.    
 Written in C using ncurses. Based mostly on `GNU nano`.  
+
+Supports:
+- macro and label highlighting
+- instructions and pseudoinstruction highlighting
+- multicarat support
+- saving / loading documents
+
+Todo still:
+- Custom colors
+- Extended colors
+- Multiline cut/paste
+- Better error checking
+- Lots of bug fixes
   
 This is still very much a work in progress, I wouldn't recommend using it on any data you like.  
   
