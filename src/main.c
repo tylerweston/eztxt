@@ -5,10 +5,8 @@
 
 /*
 *TODO:*
-- dynamic leading 0s based on # of lines
 - newline on last line should scroll down
 - deleting on first line should scroll up
-- rename dir/repo
 - insert action (action type, location, character?)
 - left/right scrolling
 - command line options? -line nums, syntax highlighting
@@ -63,7 +61,10 @@ static void set_leading_zeros();
 // GLOBALS: TODO: Get these outta here!
 size_t width, height;
 size_t absy = 0;			// absolute-y position in document
+
 char fname[MAX_FILE_NAME];
+char* current_filename = NULL;
+
 docline* currline = NULL;
 docline* head = NULL;
 docline* tail = NULL;
@@ -87,7 +88,7 @@ size_t toplineno = 1;
 cursor_pos cursors[MAX_CURSORS] = {0};
 int num_cursors = 1;
 
-char* current_filename = NULL;
+
 char debug_msg[MAX_DEBUG_MSG];
 int debug_countdown = 0;
 
@@ -453,9 +454,9 @@ int main(int argc, char** argv)
 				mvprintw(0, width - 6, "%02d, %02d", height, width);
 
 				if (current_filename)
-					mvprintw(0, (width - strlen(current_filename) - 6) / 2, "eztxt - %s", current_filename);
+					mvprintw(0, (width - strlen(current_filename) - 6) / 2, "mipsze - %s", current_filename);
 				else
-					mvprintw(0, (width - 5) / 2, "eztxt");
+					mvprintw(0, (width - 5) / 2, "mipsze");
 				mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 			}
 		}
@@ -500,7 +501,7 @@ void draw_cursors()
 	{
 		absx = cursors[i].xpos;
 		if (show_line_no)
-			absx += 5;
+			absx += leading_zeros + 2;
 		mvchgat(cursors[i].ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 	}
 }
@@ -564,9 +565,8 @@ void insert_newline(cursor_pos* cursor)
 		// insert before
 		if (head == cursor->currline)
 		{
-			if (topline == head)	// hmm, having to do this is obnoxious
+			if (topline == head)	// hmm, having to do this is obnoxious?
 				topline = newline;
-			// this is working
 			head = newline;
 		}
 		newline->prevline = cursor->currline->prevline;
@@ -574,17 +574,11 @@ void insert_newline(cursor_pos* cursor)
 		if (cursor->currline->prevline)
 			cursor->currline->prevline->nextline = newline;
 		cursor->currline->prevline = newline;
-
-		unsaved_changes = true;
-		++cursor->ypos;
-		++absy;
-		//cursor_down(cursor);
-		++est_number_lines;
-		set_leading_zeros();
-		return;
+		goto finish_scroll_down;
 	}
-	// if we get here, we aren't special case head of line
-	// so we have to move some chars down
+
+	// if we get here, we aren't special case head of line, ie cursor->xpos!=0
+	// so we have to move some chars down to the next line.
 	int nindex = 0;
 	for (size_t i = cursor->xpos; i < strlen(cursor->currline->line); ++i)
 	{
@@ -602,11 +596,13 @@ void insert_newline(cursor_pos* cursor)
 	if (tail == cursor->currline)
 		tail = newline;
 	cursor->currline = newline;
-
 	cursor->xpos = 0;
+
+finish_scroll_down:
+	// todo: scroll if we're at bottom of the screen!
 	++cursor->ypos;
 	++absy;
-	//cursor_down(cursor);
+	// cursor_down(cursor);	// just calling this here DOES NOT WORK
 	unsaved_changes = true;
 	++est_number_lines;
 	set_leading_zeros();
@@ -768,7 +764,6 @@ void draw_lines(docline* top)
 	docline* cur = top;
 	int yline = 1;
 	char ch;
-	char line_label[8];
 	do
 	{
 		move(yline, 0);
@@ -781,11 +776,7 @@ void draw_lines(docline* top)
 		if (show_line_no)
 		{
 			attron(COLOR_PAIR(LINE_NO_PAIR));
-			// todo: make %03 dynamic so it won't print leading 0s unless it needs to?
-			set_debug_msg("lz: %d   ", leading_zeros);
-			// sprintf(line_label, "%0*lu:", leading_zeros, toplineno + yline - 1);
-			//mvprintw(yline, 0, line_label);	// -1 due to 0 indexed arrays
-			mvprintw(yline, 0, "%0*lu:", leading_zeros, toplineno + yline - 1);
+			mvprintw(yline, 0, "%*lu:", (leading_zeros + 1), toplineno + yline - 1);
 			attroff(COLOR_PAIR(LINE_NO_PAIR));
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
@@ -802,7 +793,7 @@ void draw_lines(docline* top)
 				attron(clrval);
 			}
 			if (show_line_no)
-				absx = x + 5;
+				absx = x + leading_zeros + 2;
 			else
 				absx = x;
 			mvprintw(yline, absx, "%c", ch);
@@ -977,6 +968,9 @@ void initialize_doc()
 	cursors[0].ypos = 0;
 	num_cursors = 1;
 
+	free(current_filename);
+	current_filename = NULL;
+
 	set_leading_zeros();
 }
 
@@ -1006,15 +1000,6 @@ void set_leading_zeros()
 		leading_zeros = 3;
 	else
 		leading_zeros = 4;
-	// if we have bigger docs, we're in trouble
-	set_debug_msg("setting leading zeros: %d", leading_zeros);
+	// if we have bigger docs, we're in trouble? We can just use log10 to figure this out
+	// if we really want to? Tackle later.
 }
-
-
-
-// void do_menu()
-// {
-// 	set_debug_msg("Menu...");
-// 	getch();
-// }
-

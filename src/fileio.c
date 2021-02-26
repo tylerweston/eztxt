@@ -5,6 +5,8 @@
 #include "headers/main.h"
 #include "headers/fileio.h"
 
+extern char* current_filename;
+
 int load_doc(const char* filename, docline** head, docline** tail)
 {
 	int num_lines = 1;
@@ -94,9 +96,13 @@ void save_doc(const char* filename, docline* head)
 	// go through line by line and write them out to a filename
 	FILE* fptr = fopen(filename, "w");
 	docline* cur = head;
+	bool first = true;
 	do
 	{
-		fprintf(fptr, "%s\n", cur->line);
+		if (!first)
+			fprintf(fptr, "\n");
+		first = false;
+		fprintf(fptr, "%s", cur->line);
 		cur = cur->nextline;
 	} while (cur != NULL);
 	fclose(fptr);
