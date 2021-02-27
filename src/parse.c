@@ -40,6 +40,7 @@ void add_label(const char* token);
 void add_macro(const char* token);
 bool is_label(const char* token);
 bool is_macro(const char* token);
+bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size);
 
 int init_parser()
 {
@@ -355,16 +356,9 @@ bool is_keyword(const char* token)
 		if (isalpha(ch))
 			uppertoken[i] = toupper(ch);
 	}
-	for (int i = 0; i < num_kwords; ++i)
-	{
-		if (strcmp(uppertoken, kwords[i]) == 0)
-		{
-			free(uppertoken);
-			return true;
-		}
-	}
+	bool results = binarySearch(uppertoken, kwords, num_kwords);
 	free(uppertoken);
-	return false;
+	return results;
 }
 
 bool is_pseudoinstruction(const char* token)
@@ -377,16 +371,9 @@ bool is_pseudoinstruction(const char* token)
 		if (isalpha(ch))
 			uppertoken[i] = toupper(ch);
 	}
-	for (int i = 0; i < num_pinstrs; ++i)
-	{
-		if (strcmp(uppertoken, pinstrs[i]) == 0)
-		{
-			free(uppertoken);
-			return true;
-		}
-	}
+	bool results = binarySearch(uppertoken, pinstrs, num_pinstrs);
 	free(uppertoken);
-	return false;
+	return results;
 }
 
 bool is_num(const char* token)
@@ -399,4 +386,31 @@ bool is_num(const char* token)
 	char* p;
 	strtol(token, &p, 0);
 	return *p == 0;
+}
+
+bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size)
+{
+	int left = 0, right = arr_size;
+	int mid;
+	int strcmpresults;
+	while (left <= right)
+	{
+		mid = left + (right - left) / 2;
+		strcmpresults = strcmp(arr[mid], search_token);
+		if (strcmpresults == 0)
+		{
+			return true;
+		}
+		else if (strcmpresults < 0)
+		{
+			// arr char is LESS than search_toke char
+			// ie: arr -> aa search_toke -> ab
+			left = mid + 1;
+		}
+		else
+		{
+			right = mid - 1;
+		}
+	}
+	return false;
 }

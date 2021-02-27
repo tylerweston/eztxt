@@ -5,6 +5,8 @@
 
 /*
 *TODO:*
+- moving topline up/down always does the same two things
+	let's roll them into one function
 - newline on last line should scroll down
 - deleting on first line should scroll up
 - insert action (action type, location, character?)
@@ -114,21 +116,9 @@ int main(int argc, char** argv)
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
 
-	// bool menuFlag = false;
-
-	// cursors[0].xpos = 0;
-	// cursors[0].ypos = 0;
-
-	// bool had_input = false;
-	// bool exitFlag = false;
-
 	size_t linelen;
 	bool screen_clean = true;
-
 	char changes;
-
-	// docline* copy_line = NULL;
-	// docline* cut_line = NULL;
 
 	cbreak();
 	noecho();
@@ -176,15 +166,7 @@ int main(int argc, char** argv)
 
 	getmaxyx(stdscr, height, width);
 
-	// // document lines doubly linked list
-	// docline* firstline = calloc(1, sizeof(docline));
-	// firstline->prevline = NULL;
-	// firstline->nextline = NULL;
-
-	// head = firstline;
-	// tail = firstline;
-	// cursors[0].currline = firstline;
-
+	// Start our timer clock
 	clock_t now = clock();
 
 	initialize_doc();
@@ -198,16 +180,6 @@ int main(int argc, char** argv)
 		find_labels(head);
 		free(to_load);
 	}
-	// TODO: Parse command line here
-
-	// if (argc != 1 && check_file_exists(argv[1]))
-	// {
-	// 	// we can move all this stuff to a load file function
-	// 	clear_doc(head);
-	// 	load_doc(argv[1], &head, &tail);
-	// 	cursors[0].currline = head;
-	// 	find_labels(head);
-	// }
 
 	// set topline here in case we loaded a file above
 	topline = head;
@@ -680,8 +652,17 @@ void cursor_left(cursor_pos* cursor)
 	if (cursor->xpos == 0 && cursor->currline->prevline)
 	{
 		cursor->currline = cursor->currline->prevline;
-		cursor->ypos -= 1;
-		--absy;
+		if (cursor->ypos != 0)
+		{
+			--cursor->ypos;
+			--absy;
+		}
+		else
+		{
+			topline = topline->prevline;
+			--toplineno;
+			--absy;
+		}
 		cursor->xpos = strlen(cursor->currline->line);
 	}
 	else if (cursor->xpos > 0)
