@@ -1,16 +1,43 @@
-#include "headers/main.h"
-#include "headers/util.h"
-#include "headers/fileio.h"
-#include "headers/parse.h"
+/*
+mipsze, text editor with syntax highlighting for mips assembly.
+
+Copyright 2021 Tyler Weston
+
+Permission is hereby granted, free of charge, to any person obtaining a copy 
+of this software and associated documentation files (the "Software"), to deal 
+in the Software without restriction, including without limitation the rights 
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies 
+of the Software, and to permit persons to whom the Software is furnished to do 
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
 
 /*
 *TODO:*
+- Fix warning at 766!
+comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->width + cursor->xpos - 1 >= 0))
+- but cursor->width should be signed? it is just an int? hmmm.
+
+- create some sort of 'screen' data structure that holds things like width, height, etc. etc?
+	- then we might be able to do things like split/load multiple docs
+- multicarat over a spot that alreay has a carat shouldn't add a new one!
+	- we'll need to "compress" the carats here? or maybe have an "active" flag or something?
+- problem with byobu terminal and width of line number printing
+- move the OTHER carat when multi-carating (The WIDE line should stay where it was!)
 - moving topline up/down always does the same two things
 	let's roll them into one function
 - newline on last line should scroll down
 - deleting on first line should scroll up
 - insert action (action type, location, character?)
-- left/right scrolling
 - lots of bug fixes
 - unit tests
 - add menu in addition to shortcut keys?
@@ -19,17 +46,24 @@
 *MAYBE TODO:*
 - undo/redo functions?
 - increase line limit from 80 to an arbitrary amount?
-- look into using gap buffers to make editing text more efficient
+- look into using gap buffers to make editing text more efficient?
 - regex/word search in document (https://en.wikipedia.org/wiki/Boyer%E2%80%93Moore_string-search_algorithm)?
 - fuzzy-word search? (hard?)
 - open multiple documents?
 - mouse support? (https://tldp.org/HOWTO/NCURSES-Programming-HOWTO/mouse.html)?
 */
 
-static bool get_string(char* prompt, char* start, char* response, size_t max_size);	// make this also immediate get one char? ie Y or N button
-static void cleanup_and_end();
+#include "headers/main.h"
+#include "headers/util.h"
+#include "headers/fileio.h"
+#include "headers/parse.h"
 
-// void do_menu();
+
+static void parse_args(int argc, char* argv[], char ** filename);
+static bool get_string(char* prompt, char* start, char* response, size_t max_size);
+static void set_leading_zeros();
+static void cleanup_and_end();
+static void show_version_msg();
 
 // document functions
 static void check_unsaved_changes();
@@ -58,10 +92,6 @@ static void insert_character(cursor_pos* cursor, char ch);
 static void extend_cursor_left(cursor_pos* cursor);
 static void extend_cursor_right(cursor_pos* cursor);
 
-static void set_leading_zeros();
-
-
-static void parse_args(int argc, char* argv[], char ** filename);
 
 // GLOBALS: TODO: Get these outta here!
 size_t width, height;
@@ -81,7 +111,6 @@ bool unsaved_changes = false;
 int est_number_lines = 1;
 int leading_zeros = 0;
 
-
 // these will become command line options
 bool show_line_no = true;
 bool syntax_highlighting = true;
@@ -91,11 +120,11 @@ bool show_version = false;
 // top line to display for scrolling
 docline* topline;
 size_t toplineno = 1;
+size_t leftmostdigitno = 0;
 
 // cursors
 cursor_pos cursors[MAX_CURSORS] = {0};
 int num_cursors = 1;
-
 
 char debug_msg[MAX_DEBUG_MSG];
 int debug_countdown = 0;
@@ -118,7 +147,6 @@ int main(int argc, char** argv)
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
 
-	// size_t linelen;
 	bool screen_clean = true;
 	char changes;
 
@@ -145,21 +173,24 @@ int main(int argc, char** argv)
 	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
 	init_pair(MACRO_PARAM_PAIR, COLOR_YELLOW, -1);
 
-	int parser_init = init_parser();
-	if (parser_init < 0)
-	{
-		printw("Error initializing parser.\n");
-		if (parser_init == -1)
-			printw("Can't read keywords.dat\n");
-		if (parser_init == -2)
-			printw("Can't read pinstrs.dat\n");
-		printw("Press a key to exit...");
-		getch();
-		cleanup_and_end();
-	}
-
 	if (argc > 1)
 		parse_args(argc, argv, &to_load);
+
+	if (syntax_highlighting)
+	{
+		int parser_init = init_parser();
+		if (parser_init < 0)
+		{
+			printw("Error initializing parser.\n");
+			if (parser_init == -1)
+				printw("Can't read keywords.dat\n");
+			if (parser_init == -2)
+				printw("Can't read pinstrs.dat\n");
+			printw("Press a key to exit...");
+			getch();
+			cleanup_and_end();
+		}
+	}
 
 	mvprintw(0, 0, "mipze ver.%d.%d.%d - Tyler Weston - F12 exits - %s",
 	         MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION, curses_version());
@@ -503,10 +534,20 @@ int main(int argc, char** argv)
 	cleanup_and_end();
 }
 
-void cleanup_and_end()
+static void show_version_msg()
+{
+	// since this will be AFTER we've shut down curses stuff (?)
+	// we'll just printf this info
+	printf("mipze ver.%d.%d.%d - Tyler Weston\nUnder MIT License 2021\n",
+	         MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION);
+}
+
+static void cleanup_and_end()
 {
 	clear_doc(head);
 	endwin();
+	if (show_version)
+		show_version_msg();
 	exit(EXIT_SUCCESS);
 }
 
@@ -681,7 +722,11 @@ void remove_char(cursor_pos* cursor)
 
 void cursor_left(cursor_pos* cursor)
 {
-	if (cursor->xpos == 0 && cursor->currline->prevline)
+	if (cursor->xpos == 0 && leftmostdigitno > 0)
+	{
+		--leftmostdigitno;
+	}
+	else if (cursor->xpos == 0 && cursor->currline->prevline && leftmostdigitno == 0)
 	{
 		cursor->currline = cursor->currline->prevline;
 		if (cursor->ypos != 0)
@@ -705,15 +750,27 @@ void cursor_left(cursor_pos* cursor)
 
 void cursor_right(cursor_pos* cursor)
 {
-	if (cursor->xpos <= strlen(cursor->currline->line))
+	// consider line numbers being used here
+	// -4 seems icky and arbitrary, fix this with a notion of "screen" struct
+	// that can track this stuff
+	size_t scrolling_width = show_line_no ? width - leading_zeros - 4 : width;
+	if (cursor->xpos == scrolling_width && cursor->xpos <= strlen(cursor->currline->line))
+	{
+		++leftmostdigitno;
+	}
+	else if (cursor->xpos <= strlen(cursor->currline->line))
+	{
 		cursor->xpos++;
-	if (cursor->xpos > strlen(cursor->currline->line) && cursor->currline->nextline)
+	}
+	else if (cursor->xpos > strlen(cursor->currline->line) && cursor->currline->nextline)
 	{
 		cursor->currline = cursor->currline->nextline;
 		++cursor->ypos;
 		++absy;
 		cursor->xpos = 0;
 	}
+	if (leftmostdigitno > LINE_LENGTH - width)
+		leftmostdigitno = LINE_LENGTH - width;
 }
 
 void extend_cursor_right(cursor_pos* cursor)
@@ -832,7 +889,7 @@ void draw_lines(docline* top)
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
 		{
-			ch = cur->line[x];
+			ch = cur->line[x + leftmostdigitno];
 			if (syntax_highlighting)
 			{
 				if (!first)
@@ -840,7 +897,7 @@ void draw_lines(docline* top)
 					attroff(clrval);
 				}
 				first = false;
-				clrval = cur->formatting[x];
+				clrval = cur->formatting[x + leftmostdigitno];
 				attron(clrval);
 			}
 			if (show_line_no)
@@ -932,7 +989,7 @@ void wait_for_keypress()
 }
 
 // todo: move out of here?
-bool get_string(char* prompt, char* start, char* response, size_t max_size)
+static bool get_string(char* prompt, char* start, char* response, size_t max_size)
 {
 	// display prompt, with default text, and store reponse
 	// in response. return false is user presses escape, ie. no input
@@ -999,7 +1056,7 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 	return true;
 }
 
-void initialize_doc()
+static void initialize_doc()
 {
 	// create a new empty document
 	exitFlag = false;
@@ -1029,7 +1086,7 @@ void initialize_doc()
 	set_leading_zeros();
 }
 
-void clear_doc(docline* head)
+static void clear_doc(docline* head)
 {
 	// free all memory used by a document
 	docline* tmp;
@@ -1042,7 +1099,7 @@ void clear_doc(docline* head)
 	num_cursors = 0;
 }
 
-void set_leading_zeros()
+static void set_leading_zeros()
 {
 	if (est_number_lines < 10)
 		leading_zeros = 0;
@@ -1058,7 +1115,7 @@ void set_leading_zeros()
 	// if we really want to? Tackle later.
 }
 
-void parse_args(int argc, char* argv[], char ** filename)
+static void parse_args(int argc, char* argv[], char ** filename)
 {
 	int opt;
 	int option_index = 0;
