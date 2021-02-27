@@ -32,15 +32,15 @@ char kwords[NUM_KEYWORDS][MAX_TOKEN_LENGTH] = {0};
 char pinstrs[NUM_PSEUDOINSTRUCTIONS][MAX_TOKEN_LENGTH] = {0};
 int num_kwords = 0, num_pinstrs = 0;
 
-bool is_keyword(const char* token);
-bool is_pseudoinstruction(const char* token);
-int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
-bool is_num(const char* token);
-void add_label(const char* token);
-void add_macro(const char* token);
-bool is_label(const char* token);
-bool is_macro(const char* token);
-bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size);
+static bool is_keyword(const char* token);
+static bool is_pseudoinstruction(const char* token);
+static int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
+static inline bool is_num(const char* token);
+static inline void add_label(const char* token);
+static inline void add_macro(const char* token);
+static bool is_label(const char* token);
+static bool is_macro(const char* token);
+static bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size);
 
 int init_parser()
 {
@@ -54,7 +54,7 @@ int init_parser()
 	return 0;
 }
 
-int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH])
+static int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH])
 {
 	FILE* fptr = fopen(filename, "r");
 	if (!fptr)
@@ -307,19 +307,19 @@ got_token:
 	}
 }
 
-void add_label(const char* token)
+static inline void add_label(const char* token)
 {
 	strncpy( seen_labels[labels_seen], token, strlen(token) - 1);
 	labels_seen++;
 }
 
-void add_macro(const char* token)
+static inline void add_macro(const char* token)
 {
 	strncpy( seen_macros[macros_seen], token, strlen(token));
 	macros_seen++;
 }
 
-bool is_label(const char* token)
+static bool is_label(const char* token)
 {
 	for (int i = 0; i < labels_seen; ++i)
 	{
@@ -332,7 +332,7 @@ bool is_label(const char* token)
 	return false;
 }
 
-bool is_macro(const char* token)
+static bool is_macro(const char* token)
 {
 	for (int i = 0; i < macros_seen; ++i)
 	{
@@ -345,7 +345,7 @@ bool is_macro(const char* token)
 	return false;
 }
 
-bool is_keyword(const char* token)
+static bool is_keyword(const char* token)
 {
 	// make char is upper function
 	char* uppertoken = strdup(token);
@@ -361,7 +361,7 @@ bool is_keyword(const char* token)
 	return results;
 }
 
-bool is_pseudoinstruction(const char* token)
+static bool is_pseudoinstruction(const char* token)
 {
 	char* uppertoken = strdup(token);
 	char ch;
@@ -376,7 +376,7 @@ bool is_pseudoinstruction(const char* token)
 	return results;
 }
 
-bool is_num(const char* token)
+static inline bool is_num(const char* token)
 {
 	// failsafe
 	if (strlen(token) == 0)
@@ -388,7 +388,7 @@ bool is_num(const char* token)
 	return *p == 0;
 }
 
-bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size)
+static bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH], int arr_size)
 {
 	int left = 0, right = arr_size;
 	int mid;

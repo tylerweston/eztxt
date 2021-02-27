@@ -6,6 +6,18 @@
 #include "headers/fileio.h"
 
 extern char* current_filename;
+static const char* get_filename_from_path(const char* filename);
+
+static const char* get_filename_from_path(const char* filename)
+{
+	// if there is a path attached to this file,
+	// just return the filename, other do nothing
+	if (strchr(filename, '/') == NULL)
+		return filename;
+	const char* p = filename + strlen(filename);
+	while (*--p != '/');
+	return ++p;
+}
 
 int load_doc(const char* filename, docline** head, docline** tail)
 {
@@ -17,7 +29,7 @@ int load_doc(const char* filename, docline** head, docline** tail)
 	}
 	if (current_filename)
 		free(current_filename);
-	current_filename = strdup(filename);
+	current_filename = strdup(get_filename_from_path(filename));
 	docline* lastline = NULL;
 	char ch;
 	int linelen = 0;
@@ -88,7 +100,6 @@ int check_file_exists(const char* filename)
 		return 0;
 	}
 }
-
 
 void save_doc(const char* filename, docline* head)
 {

@@ -55,6 +55,8 @@ static void remove_char(cursor_pos* cursor);
 static void insert_newline(cursor_pos* cursor);
 static void insert_tab(cursor_pos* cursor);
 static void insert_character(cursor_pos* cursor, char ch);
+static void extend_cursor_left(cursor_pos* cursor);
+static void extend_cursor_right(cursor_pos* cursor);
 
 static void set_leading_zeros();
 
@@ -116,7 +118,7 @@ int main(int argc, char** argv)
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
 
-	size_t linelen;
+	// size_t linelen;
 	bool screen_clean = true;
 	char changes;
 
@@ -279,6 +281,7 @@ int main(int argc, char** argv)
 		case CTRL('y'): // new carat up
 			if (num_cursors == MAX_CURSORS)
 				break;
+			cursors[num_cursors].width = 1;
 			cursors[num_cursors].xpos = cursors[0].xpos;
 			cursors[num_cursors].ypos = cursors[0].ypos;
 			cursors[num_cursors].currline = cursors[0].currline;
@@ -291,6 +294,7 @@ int main(int argc, char** argv)
 		case CTRL('h'):	// new carat down
 			if (num_cursors == MAX_CURSORS)
 				break;
+			cursors[num_cursors].width = 1;
 			cursors[num_cursors].xpos = cursors[0].xpos;
 			cursors[num_cursors].ypos = cursors[0].ypos;
 			cursors[num_cursors].currline = cursors[0].currline;
@@ -308,21 +312,31 @@ int main(int argc, char** argv)
 
 		case KEY_SLEFT:
 		{
+			// for (int i = 0; i < num_cursors; ++i)
+			// {
+			// 	while (cursors[i].xpos > 0 && cursors[i].currline->line[cursors[i].xpos] == ' ') --cursors[i].xpos;
+			// 	while (cursors[i].xpos > 0 && cursors[i].currline->line[cursors[i].xpos] != ' ') --cursors[i].xpos;
+			// }
 			for (int i = 0; i < num_cursors; ++i)
 			{
-				while (cursors[i].xpos > 0 && cursors[i].currline->line[cursors[i].xpos] == ' ') --cursors[i].xpos;
-				while (cursors[i].xpos > 0 && cursors[i].currline->line[cursors[i].xpos] != ' ') --cursors[i].xpos;
+				cursor_left(&cursors[i]);
+				extend_cursor_right(&cursors[i]);
 			}
 			break;
 		}
 
 		case KEY_SRIGHT:
 		{
+			// for (int i = 0; i < num_cursors; ++i)
+			// {
+			// 	linelen = strlen(cursors[i].currline->line);
+			// 	while (cursors[i].xpos < linelen && cursors[i].currline->line[cursors[i].xpos] == ' ') ++cursors[i].xpos;
+			// 	while (cursors[i].xpos < linelen && cursors[i].currline->line[cursors[i].xpos] != ' ') ++cursors[i].xpos;
+			// }
 			for (int i = 0; i < num_cursors; ++i)
 			{
-				linelen = strlen(cursors[i].currline->line);
-				while (cursors[i].xpos++ < linelen && cursors[i].currline->line[cursors[i].xpos] == ' ');
-				while (cursors[i].xpos++ < linelen && cursors[i].currline->line[cursors[i].xpos] != ' ');
+				cursor_right(&cursors[i]);
+				extend_cursor_left(&cursors[i]);
 			}
 			break;
 		}
@@ -343,28 +357,40 @@ int main(int argc, char** argv)
 		case KEY_UP:
 		{
 			for (int i = 0; i < num_cursors; ++i)
+			{
+				cursors[i].width = 1;
 				cursor_up(&cursors[i]);
+			}
 			break;
 		}
 
 		case KEY_DOWN:
 		{
 			for (int i = 0; i < num_cursors; ++i)
+			{
+				cursors[i].width = 1;
 				cursor_down(&cursors[i]);
+			}
 			break;
 		}
 
 		case KEY_LEFT:
 		{
 			for (int i = 0; i < num_cursors; ++i)
+			{
+				cursors[i].width = 1;
 				cursor_left(&cursors[i]);
+			}
 			break;
 		}
 
 		case KEY_RIGHT:
 		{
 			for (int i = 0; i < num_cursors; ++i)
+			{
+				cursors[i].width = 1;
 				cursor_right(&cursors[i]);
+			}
 			break;
 		}
 
@@ -492,7 +518,11 @@ void draw_cursors()
 		absx = cursors[i].xpos;
 		if (show_line_no)
 			absx += leading_zeros + 3;
-		mvchgat(cursors[i].ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+		if (cursors[i].width > 0)
+			mvchgat(cursors[i].ypos + 1, absx, cursors[i].width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+		else if (cursors[i].width < 0)
+			mvchgat(cursors[i].ypos + 1, absx + cursors[i].width, -cursors[i].width + 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
+
 	}
 }
 
@@ -600,6 +630,8 @@ finish_scroll_down:
 
 void remove_char(cursor_pos* cursor)
 {
+	// TODO: Consider deleting an entire BLOCK of text now if the width
+	// of this cursor is greater than 1!
 	// TODO: There is still some problems here somewhere, sometimes it becomes
 	// unaligned, what are the cases when this happens?
 	// a few cases to consider when we delete a character
@@ -682,6 +714,26 @@ void cursor_right(cursor_pos* cursor)
 		++absy;
 		cursor->xpos = 0;
 	}
+}
+
+void extend_cursor_right(cursor_pos* cursor)
+{
+	if (cursor->xpos + cursor->width + 1 <= strlen(cursor->currline->line))
+	{
+		++cursor->width;
+	}
+	if (cursor->width == 0)
+		cursor->width = 1;
+}
+
+void extend_cursor_left(cursor_pos* cursor)
+{
+	if (cursor->width + cursor->xpos - 1 >= 0)
+	{
+		--cursor->width;
+	}
+	if (cursor->width == 0)
+		cursor->width = -1;	
 }
 
 void cursor_down(cursor_pos* cursor)
@@ -937,6 +989,9 @@ bool get_string(char* prompt, char* start, char* response, size_t max_size)
 			resp[resp_index] = ch;
 			++resp_index;
 			display = true;
+			if (max_size == 1 && 
+				(resp[0] == 'Y' || resp[0] == 'y' || resp[0] == 'N' || resp[0] == 'n'))
+					done_flag = true;	// immediate break if we're a single char
 			break;
 		}
 	} while (!done_flag);
@@ -965,6 +1020,7 @@ void initialize_doc()
 	topline = head;
 	cursors[0].xpos = 0;
 	cursors[0].ypos = 0;
+	cursors[0].width = 1;
 	num_cursors = 1;
 
 	free(current_filename);
