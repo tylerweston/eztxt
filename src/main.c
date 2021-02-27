@@ -9,13 +9,11 @@
 - deleting on first line should scroll up
 - insert action (action type, location, character?)
 - left/right scrolling
-- command line options? -line nums, syntax highlighting
 - lots of bug fixes
 - unit tests
 - add menu in addition to shortcut keys?
 - pressing CTRL or ALT breaks things?!
 - start writing unit tests using check!
-- there is an extra newline at the end of saved files
 *MAYBE TODO:*
 - undo/redo functions?
 - increase line limit from 80 to an arbitrary amount?
@@ -58,12 +56,16 @@ static void insert_character(cursor_pos* cursor, char ch);
 
 static void set_leading_zeros();
 
+
+static void parse_args(int argc, char* argv[], char ** filename);
+
 // GLOBALS: TODO: Get these outta here!
 size_t width, height;
 size_t absy = 0;			// absolute-y position in document
 
 char fname[MAX_FILE_NAME];
 char* current_filename = NULL;
+char* to_load = NULL;
 
 docline* currline = NULL;
 docline* head = NULL;
@@ -79,6 +81,8 @@ int leading_zeros = 0;
 // these will become command line options
 bool show_line_no = true;
 bool syntax_highlighting = true;
+bool show_help = false;
+bool show_version = false;
 
 // top line to display for scrolling
 docline* topline;
@@ -162,6 +166,9 @@ int main(int argc, char** argv)
 		cleanup_and_end();
 	}
 
+	if (argc > 1)
+		parse_args(argc, argv, &to_load);
+
 	mvprintw(0, 0, "mipze ver.%d.%d.%d - Tyler Weston - F12 exits - %s",
 	         MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION, curses_version());
 	mvchgat(0, 0, -1, 0, BAR_PAIR, NULL);
@@ -181,15 +188,26 @@ int main(int argc, char** argv)
 	clock_t now = clock();
 
 	initialize_doc();
-	// TODO: Parse command line here
-	if (argc != 1 && check_file_exists(argv[1]))
+
+	if (to_load != NULL && check_file_exists(to_load))
 	{
 		// we can move all this stuff to a load file function
-		clear_doc(head);
-		load_doc(argv[1], &head, &tail);
+		// clear_doc(head);
+		load_doc(to_load, &head, &tail);
 		cursors[0].currline = head;
 		find_labels(head);
+		free(to_load);
 	}
+	// TODO: Parse command line here
+
+	// if (argc != 1 && check_file_exists(argv[1]))
+	// {
+	// 	// we can move all this stuff to a load file function
+	// 	clear_doc(head);
+	// 	load_doc(argv[1], &head, &tail);
+	// 	cursors[0].currline = head;
+	// 	find_labels(head);
+	// }
 
 	// set topline here in case we loaded a file above
 	topline = head;
@@ -501,7 +519,7 @@ void draw_cursors()
 	{
 		absx = cursors[i].xpos;
 		if (show_line_no)
-			absx += leading_zeros + 2;
+			absx += leading_zeros + 3;
 		mvchgat(cursors[i].ypos + 1, absx, 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 	}
 }
@@ -776,7 +794,7 @@ void draw_lines(docline* top)
 		if (show_line_no)
 		{
 			attron(COLOR_PAIR(LINE_NO_PAIR));
-			mvprintw(yline, 0, "%*lu:", (leading_zeros + 1), toplineno + yline - 1);
+			mvprintw(yline, 0, "%*lu: ", (leading_zeros + 1), toplineno + yline - 1);
 			attroff(COLOR_PAIR(LINE_NO_PAIR));
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
@@ -793,7 +811,7 @@ void draw_lines(docline* top)
 				attron(clrval);
 			}
 			if (show_line_no)
-				absx = x + leading_zeros + 2;
+				absx = x + leading_zeros + 3;
 			else
 				absx = x;
 			mvprintw(yline, absx, "%c", ch);
@@ -989,7 +1007,6 @@ void clear_doc(docline* head)
 
 void set_leading_zeros()
 {
-
 	if (est_number_lines < 10)
 		leading_zeros = 0;
 	else if (est_number_lines < 100)
@@ -1002,4 +1019,51 @@ void set_leading_zeros()
 		leading_zeros = 4;
 	// if we have bigger docs, we're in trouble? We can just use log10 to figure this out
 	// if we really want to? Tackle later.
+}
+
+void parse_args(int argc, char* argv[], char ** filename)
+{
+	int opt;
+	int option_index = 0;
+	static const char* arg_flags = "hvns";
+	static struct option long_options[] =
+	{
+		{"help",					no_argument,		0, 'h'},
+		{"version",					no_argument,		0, 'v'},
+		{"no-line-numbers",			no_argument,		0, 'n'},
+		{"no-syntax-highlighting",	no_argument,		0, 's'},
+		{0,							0,					0,	0}
+	};
+
+	while (true)
+	{
+		opt = getopt_long (argc, argv, arg_flags,
+			long_options, &option_index);
+
+		if (opt == -1)
+			break;
+
+		switch (opt)
+		{
+		case 'n':
+			show_line_no = false;
+			break;
+		case 's':
+			syntax_highlighting = false;
+			break;
+		case 'h':
+			show_help = true;
+			break;
+		case 'v':
+			show_version = true;
+			break;
+		default:
+			break;
+		}
+	}
+
+	*filename = strdup(argv[argc - 1]);
+	if (filename == NULL || *filename[0] == '\0' ||
+		*filename[0] == '-')
+		filename = NULL;
 }

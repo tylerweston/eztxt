@@ -5,6 +5,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <getopt.h>
 
 #define MAJOR_VERSION 0
 #define MINOR_VERSION 1
