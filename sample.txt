@@ -1,5 +1,0 @@
-this is a sample text file.
-to practice opening text files with!
-hopefully we can open it
-FIRST TRY!
-Wouldn't that be something?

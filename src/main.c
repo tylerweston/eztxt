@@ -27,6 +27,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->width + cursor->xpos - 1 >= 0))
 - but cursor->width should be signed? it is just an int? hmmm.
 
+- switch from using est_number_lines to doc_info.number_of_lines everywhere!
+- copy/cut operations are broken currently
 - create some sort of 'screen' data structure that holds things like width, height, etc. etc?
 	- then we might be able to do things like split/load multiple docs
 - multicarat over a spot that alreay has a carat shouldn't add a new one!
@@ -35,8 +37,9 @@ comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->widt
 - move the OTHER carat when multi-carating (The WIDE line should stay where it was!)
 - moving topline up/down always does the same two things
 	let's roll them into one function
-- newline on last line should scroll down
+- backspace at first line of first char acts like delete? if you CAN'T cursor left, don't backspace?
 - deleting on first line should scroll up
+- insert char at right of screen should scroll right
 - insert action (action type, location, character?)
 - lots of bug fixes
 - unit tests
@@ -58,7 +61,7 @@ comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->widt
 #include "headers/fileio.h"
 #include "headers/parse.h"
 
-
+static bool check_for_version_flag(int argc, char** argv);
 static void parse_args(int argc, char* argv[], char ** filename);
 static bool get_string(char* prompt, char* start, char* response, size_t max_size);
 static void set_leading_zeros();
@@ -101,11 +104,17 @@ char fname[MAX_FILE_NAME];
 char* current_filename = NULL;
 char* to_load = NULL;
 
+docinfo doc_info;
 docline* currline = NULL;
 docline* head = NULL;
 docline* tail = NULL;
+
+// cutline and copyline should just be a TEXT buffer, since we DON'T
+// want to keep track of the old lines prev and next lines, we'll make 
+// new versions of those once we past.
 docline* copy_line = NULL;
 docline* cut_line = NULL;
+
 bool unsaved_changes = false;
 
 int est_number_lines = 1;
@@ -132,8 +141,16 @@ int debug_countdown = 0;
 bool had_input = false;
 bool exitFlag = false;
 
+time_t rawtime;
+struct tm * timeinfo;
+
+
 int main(int argc, char** argv)
 {
+	// preinit
+	if (check_for_version_flag(argc, argv))
+		show_version_msg();
+
 	initscr();
 
 	if (!has_colors())
@@ -208,7 +225,7 @@ int main(int argc, char** argv)
 	{
 		// we can move all this stuff to a load file function
 		// clear_doc(head);
-		load_doc(to_load, &head, &tail);
+		load_doc(to_load, &doc_info, &head, &tail);
 		cursors[0].currline = head;
 		find_labels(head);
 		free(to_load);
@@ -259,7 +276,7 @@ int main(int argc, char** argv)
 		}
 
 		// Cut/paste
-		case CTRL('k'):		// cut line
+		case CTRL('k'):		// cut line, we need to COPY the TEXT from the line
 		{
 			if (cut_line)
 				free(cut_line);
@@ -284,7 +301,6 @@ int main(int argc, char** argv)
 		{
 			if (!(cut_line || copy_line))
 				break;
-			set_debug_msg("paste line");
 			docline* newline = calloc(1, sizeof(docline));
 			docline* source;
 			if (cut_line)
@@ -425,6 +441,12 @@ int main(int argc, char** argv)
 			break;
 		}
 
+		case KEY_F(2):
+		{
+			set_debug_msg("Lines: %d Chars: %d", doc_info.number_of_lines, doc_info.number_of_chars);
+			break;
+		}
+
 		case ESC:		// exit, check for unsaved changes
 		case KEY_F(12):
 		{
@@ -540,6 +562,7 @@ static void show_version_msg()
 	// we'll just printf this info
 	printf("mipze ver.%d.%d.%d - Tyler Weston\nUnder MIT License 2021\n",
 	         MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION);
+	exit(EXIT_SUCCESS);
 }
 
 static void cleanup_and_end()
@@ -591,6 +614,7 @@ void insert_tab(cursor_pos* cursor)
 		for (size_t i = cursor->xpos; i < cursor->xpos + tab_target; ++i)
 		{
 			cursor->currline->line[i] = ' ';
+			++doc_info.number_of_chars;
 		}
 		cursor->xpos += tab_target;
 		unsaved_changes = true;
@@ -610,6 +634,7 @@ void insert_character(cursor_pos* cursor, char ch)
 		}
 
 	}
+	++doc_info.number_of_chars;
 	cursor->currline->line[cursor->xpos] = ch;
 	cursor->xpos++;
 	unsaved_changes = true;
@@ -661,8 +686,18 @@ void insert_newline(cursor_pos* cursor)
 
 finish_scroll_down:
 	// todo: scroll if we're at bottom of the screen!
-	++cursor->ypos;
-	++absy;
+	if (cursor->ypos != height - 3)
+	{
+		++cursor->ypos;
+		++absy;
+	}
+	else
+	{
+			topline = topline->nextline;
+			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+			++absy;
+			++toplineno;
+	}
 	// cursor_down(cursor);	// just calling this here DOES NOT WORK
 	unsaved_changes = true;
 	++est_number_lines;
@@ -712,6 +747,7 @@ void remove_char(cursor_pos* cursor)
 	}
 	else
 	{
+		--doc_info.number_of_chars;
 		for (int i = cursor->xpos; i < LINE_LENGTH; ++i)
 		{
 			cursor->currline->line[i] = cursor->currline->line[i + 1];
@@ -854,7 +890,8 @@ void remove_line(docline* line, docline** head, docline** tail)
 {
 	if (*head == *tail && *head == line)
 		return;
-	--est_number_lines;
+	// --est_number_lines;
+	--doc_info.number_of_lines;
 	set_leading_zeros();
 	if (*head == line)
 		*head = line->nextline;
@@ -955,7 +992,7 @@ void load_document()
 
 	// return a value from load_doc. make load_doc take a temp head and if
 	// it succeeds, clear the old doc and set the new head to the temp head
-	int est_number_lines = load_doc(fname, &tmp_head, &tail); 
+	int est_number_lines = load_doc(fname, &doc_info, &tmp_head, &tail); 
 	if (est_number_lines == -1)
 	{
 		set_debug_msg("Error loading %s", fname);
@@ -1083,6 +1120,9 @@ static void initialize_doc()
 	free(current_filename);
 	current_filename = NULL;
 
+	doc_info.number_of_lines = 0;
+	doc_info.number_of_chars = 0;
+
 	set_leading_zeros();
 }
 
@@ -1090,6 +1130,12 @@ static void clear_doc(docline* head)
 {
 	// free all memory used by a document
 	docline* tmp;
+	if (cut_line)
+		free(cut_line);
+	if (copy_line)
+		free(copy_line);
+	cut_line = NULL;
+	copy_line = NULL;
 	while (head != NULL)
 	{
 		tmp = head->nextline;
@@ -1101,13 +1147,13 @@ static void clear_doc(docline* head)
 
 static void set_leading_zeros()
 {
-	if (est_number_lines < 10)
+	if (doc_info.number_of_lines < 10)
 		leading_zeros = 0;
-	else if (est_number_lines < 100)
+	else if (doc_info.number_of_lines < 100)
 		leading_zeros = 1;
-	else if (est_number_lines < 1000)
+	else if (doc_info.number_of_lines < 1000)
 		leading_zeros = 2;
-	else if (est_number_lines < 10000)
+	else if (doc_info.number_of_lines < 10000)
 		leading_zeros = 3;
 	else
 		leading_zeros = 4;
@@ -1123,7 +1169,6 @@ static void parse_args(int argc, char* argv[], char ** filename)
 	static struct option long_options[] =
 	{
 		{"help",					no_argument,		0, 'h'},
-		{"version",					no_argument,		0, 'v'},
 		{"no-line-numbers",			no_argument,		0, 'n'},
 		{"no-syntax-highlighting",	no_argument,		0, 's'},
 		{0,							0,					0,	0}
@@ -1148,9 +1193,6 @@ static void parse_args(int argc, char* argv[], char ** filename)
 		case 'h':
 			show_help = true;
 			break;
-		case 'v':
-			show_version = true;
-			break;
 		default:
 			break;
 		}
@@ -1160,4 +1202,14 @@ static void parse_args(int argc, char* argv[], char ** filename)
 	if (filename == NULL || *filename[0] == '\0' ||
 		*filename[0] == '-')
 		filename = NULL;
+}
+
+static bool check_for_version_flag(int argc, char* argv[])
+{
+	for (int i = 1; i < argc; ++i)
+	{
+		if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0)
+			return true;			
+	}
+	return false;
 }

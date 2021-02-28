@@ -19,7 +19,7 @@ static const char* get_filename_from_path(const char* filename)
 	return ++p;
 }
 
-int load_doc(const char* filename, docline** head, docline** tail)
+int load_doc(const char* filename, docinfo* doc_info, docline** head, docline** tail)
 {
 	int num_lines = 1;
 	FILE *fptr = fopen(filename, "r");
@@ -33,6 +33,8 @@ int load_doc(const char* filename, docline** head, docline** tail)
 	docline* lastline = NULL;
 	char ch;
 	int linelen = 0;
+	doc_info->number_of_lines = 1;
+	doc_info->number_of_chars = 0;
 	docline* currline = calloc(1, sizeof(docline));
 	currline->prevline = NULL;
 	currline->nextline = NULL;
@@ -59,6 +61,7 @@ int load_doc(const char* filename, docline** head, docline** tail)
 			currline->prevline = lastline;
 			lastline->nextline = currline;
 			++num_lines;
+			++doc_info->number_of_lines;
 		}
 		else if (ch == '\t')
 		{
@@ -67,11 +70,13 @@ int load_doc(const char* filename, docline** head, docline** tail)
 			{
 				currline->line[linelen] = ' ';
 				linelen++;
+				++doc_info->number_of_chars;
 			}
 		}
 		else
 		{
 			currline->line[linelen] = ch;
+			++doc_info->number_of_chars;
 			++linelen;
 		}
 	}

@@ -52,6 +52,12 @@ typedef struct
 	// todo: each cursor will keep track of it's own current line!
 } cursor_pos;
 
+typedef struct 
+{
+	size_t number_of_lines;
+	size_t number_of_chars;
+} docinfo;
+
 
 
 #define CUR_PAIR 1
