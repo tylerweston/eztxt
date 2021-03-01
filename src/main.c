@@ -61,6 +61,8 @@ comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->widt
 #include "headers/fileio.h"
 #include "headers/parse.h"
 
+static void initialize_terminal();
+static void initialize_colors();
 static bool check_for_version_flag(int argc, char** argv);
 static void parse_args(int argc, char* argv[], char ** filename);
 static bool get_string(char* prompt, char* start, char* response, size_t max_size);
@@ -109,11 +111,6 @@ char* to_load = NULL;
 // for now, only allow a SINGLE doc to be loaded, that
 // we'll name (imaginatively) document
 doc* main_document;
-// docline* currline = NULL;
-
-// // head and tail are a feature of a single doc
-// docline* head = NULL;
-// docline* tail = NULL;
 
 // cutline and copyline should just be a TEXT buffer, since we DON'T
 // want to keep track of the old lines prev and next lines, we'll make 
@@ -122,9 +119,6 @@ doc* main_document;
 docline* copy_line = NULL;
 docline* cut_line = NULL;
 
-// bool unsaved_changes = false;
-
-// int est_number_lines = 1;
 int leading_zeros = 0;
 
 // these will become command line options
@@ -154,11 +148,13 @@ struct tm * timeinfo;
 
 int main(int argc, char** argv)
 {
- 	// preinit
+ 	// preinit, we should parse ALL arguments up here, in case
+ 	// we need to do anything that involves not having to load
+ 	// curses
 	if (check_for_version_flag(argc, argv))
 		show_version_msg();
 
-	initscr();
+	initialize_terminal();
 
 	if (!has_colors())
 	{
@@ -167,35 +163,13 @@ int main(int argc, char** argv)
 		getch();
 		cleanup_and_end();
 	}
+	initialize_colors();
 
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
 
 	bool screen_clean = true;
 	char changes;
-
-	cbreak();
-	noecho();
-	nodelay(stdscr, TRUE);
-	keypad(stdscr, TRUE);
-	curs_set(0);
-
-	use_default_colors();
-	start_color();
-	init_pair(CUR_PAIR, COLOR_RED, COLOR_BLACK);
-	init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
-	init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
-	init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
-	init_pair(PUNC_PAIR, COLOR_BLUE, -1);
-	init_pair(REG_PAIR, COLOR_YELLOW, -1);
-	init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
-	init_pair(KEYWORD_PAIR, COLOR_WHITE, -1);
-	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
-	init_pair(NUM_PAIR, COLOR_CYAN, -1);
-	init_pair(ERROR_PAIR, COLOR_RED, -1);
-	init_pair(ERROR_BLOCK_PAIR, -1, COLOR_RED);
-	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
-	init_pair(MACRO_PARAM_PAIR, COLOR_YELLOW, -1);
 
 	if (argc > 1)
 		parse_args(argc, argv, &to_load);
@@ -463,12 +437,6 @@ int main(int argc, char** argv)
 			break;
 		}
 
-		// case KEY_F(2):
-		// {
-		// 	menuFlag = true;
-		// 	break;
-		// }
-
 		case KEY_BACKSPACE:
 		{
 			for (int i = 0; i < num_cursors; ++i)
@@ -500,12 +468,6 @@ int main(int argc, char** argv)
 			break;
 		}
 		}
-
-		// if (menuFlag)
-		// {
-		// 	// not implemented yet
-		// 	// do_menu();
-		// }
 
 		if (!screen_clean)
 		{
@@ -563,6 +525,36 @@ int main(int argc, char** argv)
 	cleanup_and_end();
 }
 
+static void initialize_terminal()
+{
+	initscr();
+	cbreak();
+	noecho();
+	nodelay(stdscr, TRUE);
+	keypad(stdscr, TRUE);
+	curs_set(0);
+}
+
+static void initialize_colors()
+{
+	use_default_colors();
+	start_color();
+	init_pair(CUR_PAIR, COLOR_RED, COLOR_BLACK);
+	init_pair(QUOTE_PAIR, COLOR_CYAN, -1);
+	init_pair(BAR_PAIR, -1, COLOR_MAGENTA);
+	init_pair(COMMENT_PAIR, COLOR_GREEN, - 1);
+	init_pair(PUNC_PAIR, COLOR_BLUE, -1);
+	init_pair(REG_PAIR, COLOR_YELLOW, -1);
+	init_pair(SECTION_PAIR, COLOR_MAGENTA, -1);
+	init_pair(KEYWORD_PAIR, COLOR_WHITE, -1);
+	init_pair(LABEL_PAIR, COLOR_BLUE, -1);
+	init_pair(NUM_PAIR, COLOR_CYAN, -1);
+	init_pair(ERROR_PAIR, COLOR_RED, -1);
+	init_pair(ERROR_BLOCK_PAIR, -1, COLOR_RED);
+	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
+	init_pair(MACRO_PARAM_PAIR, COLOR_YELLOW, -1);
+}
+
 static void show_version_msg()
 {
 	// since this will be AFTER we've shut down curses stuff (?)
@@ -593,7 +585,6 @@ void draw_cursors()
 			mvchgat(cursors[i].ypos + 1, absx, cursors[i].width, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
 		else if (cursors[i].width < 0)
 			mvchgat(cursors[i].ypos + 1, absx + cursors[i].width, -cursors[i].width + 1, A_REVERSE, COLOR_PAIR(CUR_PAIR), NULL);
-
 	}
 }
 
@@ -705,10 +696,8 @@ finish_scroll_down:
 			++absy;
 			++toplineno;
 	}
-	// cursor_down(cursor);	// just calling this here DOES NOT WORK
 	main_document->unsaved_changes = true;
 	++main_document->number_of_lines;
-	//++est_number_lines;
 	set_leading_zeros();
 }
 
@@ -797,7 +786,7 @@ void cursor_right(cursor_pos* cursor)
 {
 	// consider line numbers being used here
 	// -4 seems icky and arbitrary, fix this with a notion of "screen" struct
-	// that can track this stuff
+	// that can track this stuff?
 	size_t scrolling_width = show_line_no ? width - leading_zeros - 4 : width;
 	if (cursor->xpos == scrolling_width && cursor->xpos <= strlen(cursor->currline->line))
 	{
@@ -894,12 +883,11 @@ void set_debug_msg(const char* msg, ...)
 	refresh();
 }
 
-// this should take a docline and a document
+// this should take a docline to delete and the document it's from
 void remove_line(docline* line, docline** head, docline** tail)
 {
 	if (*head == *tail && *head == line)
 		return;
-	// --est_number_lines;
 	--main_document->number_of_lines;
 	set_leading_zeros();
 	if (*head == line)
@@ -961,7 +949,7 @@ void draw_lines(docline* top)
 	refresh();
 }
 
-// this shouuld take a document
+// this should take a document
 void save_document()
 {
 	memset(fname, 0, MAX_FILE_NAME);
@@ -1009,11 +997,9 @@ void load_document()
 	if (load_return_value == -1)
 	{
 		set_debug_msg("Error loading %s", fname);
-		//est_number_lines = 1;
 		main_document->number_of_lines = 1;
 		return;
 	}
-	// main_document.head = tmp_head;
 
 	cursors[0].currline = main_document->head;
 	cursors[0].xpos = 0;
