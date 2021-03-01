@@ -19,7 +19,9 @@ static const char* get_filename_from_path(const char* filename)
 	return ++p;
 }
 
-int load_doc(const char* filename, docinfo* doc_info, docline** head, docline** tail)
+// this should only take a filename and a doc, since we're
+// just filling in information in the doc, such as head and tail
+int load_doc(const char* filename, doc* document)
 {
 	int num_lines = 1;
 	FILE *fptr = fopen(filename, "r");
@@ -33,23 +35,25 @@ int load_doc(const char* filename, docinfo* doc_info, docline** head, docline** 
 	docline* lastline = NULL;
 	char ch;
 	int linelen = 0;
-	doc_info->number_of_lines = 1;
-	doc_info->number_of_chars = 0;
+	document->number_of_lines = 1;
+	document->number_of_chars = 0;
 	docline* currline = calloc(1, sizeof(docline));
-	currline->prevline = NULL;
-	currline->nextline = NULL;
 	if (currline == NULL)
 	{
+		// problem with calloc'ing
 		return -1;
 	}
-	*head = currline;
+	currline->prevline = NULL;
+	currline->nextline = NULL;
+	document->head = currline;
+
 	for (;;)
 	{
 		ch = fgetc(fptr);
 		if (feof(fptr))
 		{
 			// end of document
-			*tail = currline;
+			document->tail = currline;
 			break;
 		}
 		else if (ch == '\n' || linelen >= 79)
@@ -61,7 +65,7 @@ int load_doc(const char* filename, docinfo* doc_info, docline** head, docline** 
 			currline->prevline = lastline;
 			lastline->nextline = currline;
 			++num_lines;
-			++doc_info->number_of_lines;
+			++document->number_of_lines;
 		}
 		else if (ch == '\t')
 		{
@@ -69,19 +73,20 @@ int load_doc(const char* filename, docinfo* doc_info, docline** head, docline** 
 			for (int i = 0; i < tab_target; ++i)
 			{
 				currline->line[linelen] = ' ';
-				linelen++;
-				++doc_info->number_of_chars;
+				++linelen;
+				++document->number_of_chars;
 			}
 		}
 		else
 		{
 			currline->line[linelen] = ch;
-			++doc_info->number_of_chars;
+			++document->number_of_chars;
 			++linelen;
 		}
 	}
+
 	fclose(fptr);
-	return num_lines;
+	return 0;
 }
 
 int check_file_exists(const char* filename)
@@ -106,12 +111,12 @@ int check_file_exists(const char* filename)
 	}
 }
 
-void save_doc(const char* filename, docline* head)
+void save_doc(const char* filename, doc* document)
 {
 	// save a document
 	// go through line by line and write them out to a filename
 	FILE* fptr = fopen(filename, "w");
-	docline* cur = head;
+	docline* cur = document->head;
 	bool first = true;
 	do
 	{

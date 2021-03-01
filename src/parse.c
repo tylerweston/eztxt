@@ -34,7 +34,7 @@ int num_kwords = 0, num_pinstrs = 0;
 
 static bool is_keyword(const char* token);
 static bool is_pseudoinstruction(const char* token);
-static int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
+static int read_dat_file(const char* filename, char arr[][MAX_TOKEN_LENGTH]);
 static inline bool is_num(const char* token);
 static inline void add_label(const char* token);
 static inline void add_macro(const char* token);
@@ -45,16 +45,16 @@ static bool binarySearch(const char* search_token, char arr[][MAX_TOKEN_LENGTH],
 int init_parser()
 {
 	// init kwords
-	num_kwords = read_file("dat/keywords.dat", kwords);
+	num_kwords = read_dat_file("dat/keywords.dat", kwords);
 	if (num_kwords == -1)
 		return -1;
-	num_pinstrs = read_file("dat/pinstrs.dat", pinstrs);
+	num_pinstrs = read_dat_file("dat/pinstrs.dat", pinstrs);
 	if (num_pinstrs == -1)
 		return -2;
 	return 0;
 }
 
-static int read_file(const char* filename, char arr[][MAX_TOKEN_LENGTH])
+static int read_dat_file(const char* filename, char arr[][MAX_TOKEN_LENGTH])
 {
 	FILE* fptr = fopen(filename, "r");
 	if (!fptr)
