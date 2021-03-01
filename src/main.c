@@ -27,7 +27,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->width + cursor->xpos - 1 >= 0))
 - but cursor->width should be signed? it is just an int? hmmm.
 
-- switch from using est_number_lines to doc_info.number_of_lines everywhere!
+- switch from using est_number_lines to document.number_of_lines everywhere!
 - copy/cut operations are broken currently
 - create some sort of 'screen' data structure that holds things like width, height, etc. etc?
 	- then we might be able to do things like split/load multiple docs
@@ -67,6 +67,7 @@ static bool get_string(char* prompt, char* start, char* response, size_t max_siz
 static void set_leading_zeros();
 static void cleanup_and_end();
 static void show_version_msg();
+static inline void clear_status_bar();
 
 // document functions
 static void check_unsaved_changes();
@@ -77,7 +78,7 @@ static void initialize_doc();
 // line editing
 static void draw_lines(docline*);
 static void remove_line(docline* line, docline** head, docline** tail);
-static void clear_doc(docline* head);
+static void clear_doc(doc* document);
 
 static void draw_cursors();
 
@@ -98,26 +99,32 @@ static void extend_cursor_right(cursor_pos* cursor);
 
 // GLOBALS: TODO: Get these outta here!
 size_t width, height;
+// should this be in the doc struct
 size_t absy = 0;			// absolute-y position in document
 
 char fname[MAX_FILE_NAME];
 char* current_filename = NULL;
 char* to_load = NULL;
 
-docinfo doc_info;
-docline* currline = NULL;
-docline* head = NULL;
-docline* tail = NULL;
+// for now, only allow a SINGLE doc to be loaded, that
+// we'll name (imaginatively) document
+doc* main_document;
+// docline* currline = NULL;
+
+// // head and tail are a feature of a single doc
+// docline* head = NULL;
+// docline* tail = NULL;
 
 // cutline and copyline should just be a TEXT buffer, since we DON'T
 // want to keep track of the old lines prev and next lines, we'll make 
 // new versions of those once we past.
+// copy line and cut line are features of the current context
 docline* copy_line = NULL;
 docline* cut_line = NULL;
 
-bool unsaved_changes = false;
+// bool unsaved_changes = false;
 
-int est_number_lines = 1;
+// int est_number_lines = 1;
 int leading_zeros = 0;
 
 // these will become command line options
@@ -127,6 +134,7 @@ bool show_help = false;
 bool show_version = false;
 
 // top line to display for scrolling
+// these will be parts of the context
 docline* topline;
 size_t toplineno = 1;
 size_t leftmostdigitno = 0;
@@ -144,10 +152,9 @@ bool exitFlag = false;
 time_t rawtime;
 struct tm * timeinfo;
 
-
 int main(int argc, char** argv)
 {
-	// preinit
+ 	// preinit
 	if (check_for_version_flag(argc, argv))
 		show_version_msg();
 
@@ -218,6 +225,7 @@ int main(int argc, char** argv)
 
 	// Start our timer clock
 	clock_t now = clock();
+	main_document = calloc(1, sizeof(doc));
 
 	initialize_doc();
 
@@ -225,16 +233,16 @@ int main(int argc, char** argv)
 	{
 		// we can move all this stuff to a load file function
 		// clear_doc(head);
-		load_doc(to_load, &doc_info, &head, &tail);
-		cursors[0].currline = head;
-		find_labels(head);
+		load_doc(to_load, main_document);
+		cursors[0].currline = main_document->head;
+		find_labels(main_document->head);
 		free(to_load);
 	}
 
 	// set topline here in case we loaded a file above
-	topline = head;
+	topline = main_document->head;
 
-	draw_lines(head);
+	draw_lines(main_document->head);
 	draw_cursors();
 
 	while (!exitFlag)
@@ -270,7 +278,7 @@ int main(int argc, char** argv)
 		case CTRL('n'):		// new document
 		{
 			check_unsaved_changes();
-			clear_doc(head);
+			clear_doc(main_document);
 			initialize_doc();
 			break;
 		}
@@ -284,7 +292,7 @@ int main(int argc, char** argv)
 				copy_line = NULL;
 			cut_line = cursors[0].currline;
 			docline* tmp = cursors[0].currline->nextline;
-			remove_line(cursors[0].currline, &head, &tail);
+			remove_line(cursors[0].currline, &main_document->head, &main_document->tail);
 			cursors[0].currline = tmp;
 			break;
 		}
@@ -314,8 +322,8 @@ int main(int argc, char** argv)
 			if (cursors[0].currline->prevline)
 				cursors[0].currline->prevline->nextline = newline;
 			cursors[0].currline->prevline = newline;
-			if (cursors[0].currline == head)
-				head = newline;
+			if (cursors[0].currline == main_document->head)
+				main_document->head = newline;
 			cursors[0].currline = newline;
 			break;
 		}
@@ -443,7 +451,7 @@ int main(int argc, char** argv)
 
 		case KEY_F(2):
 		{
-			set_debug_msg("Lines: %d Chars: %d", doc_info.number_of_lines, doc_info.number_of_chars);
+			set_debug_msg("Lines: %d Chars: %d", main_document->number_of_lines, main_document->number_of_chars);
 			break;
 		}
 
@@ -506,7 +514,7 @@ int main(int argc, char** argv)
 			{
 				clear_macros();
 				clear_labels();
-				find_labels(head);
+				find_labels(main_document->head);
 			}
 
 			clear();
@@ -515,7 +523,7 @@ int main(int argc, char** argv)
 
 			if (had_input)	// just so we can show the title bar until a key is pressed? find a better way.
 			{
-				if (unsaved_changes)
+				if (main_document->unsaved_changes)
 					changes = 'U';
 				else
 					changes = ' ';
@@ -536,8 +544,7 @@ int main(int argc, char** argv)
 		}
 		else if (debug_countdown == 1)
 		{
-			move(height - 1, 0);
-			clrtoeol();
+			clear_status_bar();
 		}
 
 		mvprintw(height - 1, width - 15, "cpu: %.2fGHz", avg_cpu_mhz);
@@ -567,7 +574,7 @@ static void show_version_msg()
 
 static void cleanup_and_end()
 {
-	clear_doc(head);
+	clear_doc(main_document);
 	endwin();
 	if (show_version)
 		show_version_msg();
@@ -592,7 +599,7 @@ void draw_cursors()
 
 void check_unsaved_changes()
 {
-	if (unsaved_changes)
+	if (main_document->unsaved_changes)
 	{
 		char sure[2];
 		get_string ("You have unsaved changes, save?(Y/n)", NULL, sure, 1);
@@ -614,10 +621,10 @@ void insert_tab(cursor_pos* cursor)
 		for (size_t i = cursor->xpos; i < cursor->xpos + tab_target; ++i)
 		{
 			cursor->currline->line[i] = ' ';
-			++doc_info.number_of_chars;
+			++main_document->number_of_chars;
 		}
 		cursor->xpos += tab_target;
-		unsaved_changes = true;
+		main_document->unsaved_changes = true;
 	}
 }
 
@@ -634,10 +641,10 @@ void insert_character(cursor_pos* cursor, char ch)
 		}
 
 	}
-	++doc_info.number_of_chars;
+	++main_document->number_of_chars;
 	cursor->currline->line[cursor->xpos] = ch;
 	cursor->xpos++;
-	unsaved_changes = true;
+	main_document->unsaved_changes = true;
 }
 
 void insert_newline(cursor_pos* cursor)
@@ -649,11 +656,11 @@ void insert_newline(cursor_pos* cursor)
 	if (cursor->xpos == 0)
 	{
 		// insert before
-		if (head == cursor->currline)
+		if (main_document->head == cursor->currline)
 		{
-			if (topline == head)	// hmm, having to do this is obnoxious?
+			if (topline == main_document->head)	// hmm, having to do this is obnoxious?
 				topline = newline;
-			head = newline;
+			main_document->head = newline;
 		}
 		newline->prevline = cursor->currline->prevline;
 		newline->nextline = cursor->currline;
@@ -679,8 +686,8 @@ void insert_newline(cursor_pos* cursor)
 	newline->prevline = cursor->currline;
 	newline->nextline = cursor->currline->nextline;
 	cursor->currline->nextline = newline;
-	if (tail == cursor->currline)
-		tail = newline;
+	if (main_document->tail == cursor->currline)
+		main_document->tail = newline;
 	cursor->currline = newline;
 	cursor->xpos = 0;
 
@@ -699,8 +706,9 @@ finish_scroll_down:
 			++toplineno;
 	}
 	// cursor_down(cursor);	// just calling this here DOES NOT WORK
-	unsaved_changes = true;
-	++est_number_lines;
+	main_document->unsaved_changes = true;
+	++main_document->number_of_lines;
+	//++est_number_lines;
 	set_leading_zeros();
 }
 
@@ -714,13 +722,14 @@ void remove_char(cursor_pos* cursor)
 	// TODO: What if we are a multicarat that is on a line that gets deleted?
 	if (cursor->xpos == 0 && cursor->currline->line[0] == '\0')
 	{
-		if (cursor->currline == head && cursor->currline->nextline == NULL)
+		if (cursor->currline == main_document->head && 
+			cursor->currline->nextline == NULL)
 		{
 			// empty document, nothing to do here
 			return;
 		}
 		docline* tmp;
-		if (cursor->currline == tail)
+		if (cursor->currline == main_document->tail)
 		{
 			tmp = cursor->currline->prevline;
 			--cursor->ypos;
@@ -730,7 +739,7 @@ void remove_char(cursor_pos* cursor)
 		{
 			tmp = cursor->currline->nextline;
 		}
-		remove_line(cursor->currline, &head, &tail);
+		remove_line(cursor->currline, &main_document->head, &main_document->tail);
 		cursor->currline = tmp;
 	}
 	else if (cursor->xpos == strlen(cursor->currline->line) && cursor->currline->nextline != NULL)
@@ -743,17 +752,17 @@ void remove_char(cursor_pos* cursor)
 			cursor->currline->line[lineindex++] = cursor->currline->nextline->line[i];
 			if (lineindex >= 80) lineindex = 80;
 		}
-		remove_line(cursor->currline->nextline, &head, &tail);
+		remove_line(cursor->currline->nextline, &main_document->head, &main_document->tail);
 	}
 	else
 	{
-		--doc_info.number_of_chars;
+		--main_document->number_of_chars;
 		for (int i = cursor->xpos; i < LINE_LENGTH; ++i)
 		{
 			cursor->currline->line[i] = cursor->currline->line[i + 1];
 		}
 	}
-	unsaved_changes = true;
+	main_document->unsaved_changes = true;
 }
 
 void cursor_left(cursor_pos* cursor)
@@ -885,13 +894,13 @@ void set_debug_msg(const char* msg, ...)
 	refresh();
 }
 
-
+// this should take a docline and a document
 void remove_line(docline* line, docline** head, docline** tail)
 {
 	if (*head == *tail && *head == line)
 		return;
 	// --est_number_lines;
-	--doc_info.number_of_lines;
+	--main_document->number_of_lines;
 	set_leading_zeros();
 	if (*head == line)
 		*head = line->nextline;
@@ -903,6 +912,7 @@ void remove_line(docline* line, docline** head, docline** tail)
 		line->prevline->nextline = line->nextline;
 }
 
+// this should take a document
 void draw_lines(docline* top)
 {
 	int max_lines = height - 1;
@@ -951,6 +961,7 @@ void draw_lines(docline* top)
 	refresh();
 }
 
+// this shouuld take a document
 void save_document()
 {
 	memset(fname, 0, MAX_FILE_NAME);
@@ -965,19 +976,21 @@ void save_document()
 			return;
 	}
 	set_debug_msg("Saving %s", fname);
-	save_doc(fname, head);
+	save_doc(fname, main_document);
 	if (current_filename)
 		free(current_filename);
 	current_filename = strdup(fname);
 	set_debug_msg("Saved %s", fname);
-	unsaved_changes = false;
+	main_document->unsaved_changes = false;
 }
 
+// hmmm, this will take a document and fill it int?
 void load_document()
 {
 	memset(fname, 0, MAX_FILE_NAME);
 	if (!get_string("Load file", NULL, fname, MAX_FILE_NAME))
 		return;
+	clear_status_bar();
 	set_debug_msg("Loading %s", fname);
 
 	if (check_file_exists(fname) == 0)
@@ -988,30 +1001,37 @@ void load_document()
 
 	// TODO: Don't clear doc until we know
 	// file has loaded succesfully?
-	docline* tmp_head;
+	// docline* tmp_head;
 
-	// return a value from load_doc. make load_doc take a temp head and if
-	// it succeeds, clear the old doc and set the new head to the temp head
-	int est_number_lines = load_doc(fname, &doc_info, &tmp_head, &tail); 
-	if (est_number_lines == -1)
+	// need a different way to do this
+	clear_doc(main_document);
+	int load_return_value = load_doc(fname, main_document); 
+	if (load_return_value == -1)
 	{
 		set_debug_msg("Error loading %s", fname);
-		est_number_lines = 1;
+		//est_number_lines = 1;
+		main_document->number_of_lines = 1;
 		return;
 	}
+	// main_document.head = tmp_head;
 
-	clear_doc(head);
-	head = tmp_head;
-	find_labels(head);
-	cursors[0].currline = head;
-	topline = head;
+	cursors[0].currline = main_document->head;
 	cursors[0].xpos = 0;
 	cursors[0].ypos = 0;
 	num_cursors = 1;
+
+	topline = main_document->head;
+	main_document->unsaved_changes = false;
+
+	toplineno = 1;
+	leftmostdigitno = 0;
+	absy = 0;
+
+	find_labels(main_document->head);
 	set_leading_zeros();
-	draw_lines(head);
+	draw_lines(main_document->head);
 	set_debug_msg("Loaded %s", fname);
-	unsaved_changes = false;
+
 }
 
 void wait_for_keypress()
@@ -1031,22 +1051,27 @@ static bool get_string(char* prompt, char* start, char* response, size_t max_siz
 	// display prompt, with default text, and store reponse
 	// in response. return false is user presses escape, ie. no input
 	// clear any existing debug message
-	set_debug_msg("");
-	move(height - 1, 0);
-	clrtoeol();
-	printw("%s: ", prompt);
-	char resp[max_size + 1];
-	memset(resp, 0, max_size + 1);
-	if (start)
-		strcpy(resp, start);
 	wchar_t ch;
 	size_t resp_index;
-	if (start)
-		resp_index = strlen(start);
-	else
-		resp_index = 0;
 	bool done_flag = false;
 	bool display = true;
+	char resp[max_size + 1];
+	memset(resp, 0, max_size + 1);
+
+	set_debug_msg("");
+	clear_status_bar();
+	printw("%s: ", prompt);
+	
+	if (start)
+	{
+		strcpy(resp, start);
+		resp_index = strlen(start);
+	}
+	else
+	{
+		resp_index = 0;
+	}
+
 	do
 	{
 		if (display)
@@ -1101,17 +1126,18 @@ static void initialize_doc()
 	copy_line = NULL;
 	cut_line = NULL;
 
+	// we just call create_new_doc here
 	// create a single empty line to begin with
 	// document lines doubly linked list
 	docline* firstline = calloc(1, sizeof(docline));
 	firstline->prevline = NULL;
 	firstline->nextline = NULL;
 
-	head = firstline;
-	tail = firstline;
+	main_document->head = firstline;
+	main_document->tail = firstline;
 
-	cursors[0].currline = head;
-	topline = head;
+	cursors[0].currline = main_document->head;
+	topline = main_document->head;
 	cursors[0].xpos = 0;
 	cursors[0].ypos = 0;
 	cursors[0].width = 1;
@@ -1120,40 +1146,47 @@ static void initialize_doc()
 	free(current_filename);
 	current_filename = NULL;
 
-	doc_info.number_of_lines = 0;
-	doc_info.number_of_chars = 0;
+	main_document->number_of_lines = 0;
+	main_document->number_of_chars = 0;
+	main_document->unsaved_changes = false;
+
+	toplineno = 1;
+	leftmostdigitno = 0;
+	absy = 0;
 
 	set_leading_zeros();
 }
 
-static void clear_doc(docline* head)
+// this should take a doc type instead
+static void clear_doc(doc* document)
 {
 	// free all memory used by a document
-	docline* tmp;
+	docline* tmp = document->head;
+	docline* tmp2;
 	if (cut_line)
 		free(cut_line);
 	if (copy_line)
 		free(copy_line);
 	cut_line = NULL;
 	copy_line = NULL;
-	while (head != NULL)
+	while (tmp != NULL)
 	{
-		tmp = head->nextline;
-		free(head);
-		head = tmp;
+		tmp2 = tmp->nextline;
+		free(tmp);
+		tmp = tmp2;
 	}
 	num_cursors = 0;
 }
 
 static void set_leading_zeros()
 {
-	if (doc_info.number_of_lines < 10)
+	if (main_document->number_of_lines < 10)
 		leading_zeros = 0;
-	else if (doc_info.number_of_lines < 100)
+	else if (main_document->number_of_lines < 100)
 		leading_zeros = 1;
-	else if (doc_info.number_of_lines < 1000)
+	else if (main_document->number_of_lines < 1000)
 		leading_zeros = 2;
-	else if (doc_info.number_of_lines < 10000)
+	else if (main_document->number_of_lines < 10000)
 		leading_zeros = 3;
 	else
 		leading_zeros = 4;
@@ -1212,4 +1245,10 @@ static bool check_for_version_flag(int argc, char* argv[])
 			return true;			
 	}
 	return false;
+}
+
+static inline void clear_status_bar()
+{
+	move(height - 1, 0);
+	clrtoeol();	
 }

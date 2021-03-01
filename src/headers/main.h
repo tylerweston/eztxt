@@ -43,7 +43,7 @@ typedef struct docline
 	struct docline* nextline;
 } docline;
 
-typedef struct
+typedef struct cursor_pos
 {
 	size_t xpos;
 	size_t ypos;
@@ -52,11 +52,14 @@ typedef struct
 	// todo: each cursor will keep track of it's own current line!
 } cursor_pos;
 
-typedef struct 
+typedef struct doc 
 {
+	docline* head;
+	docline* tail;
 	size_t number_of_lines;
 	size_t number_of_chars;
-} docinfo;
+	bool unsaved_changes;
+} doc;
 
 
 
