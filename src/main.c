@@ -27,7 +27,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->width + cursor->xpos - 1 >= 0))
 - but cursor->width should be signed? it is just an int? hmmm.
 
-- switch from using est_number_lines to document.number_of_lines everywhere!
+- tab button isn't quite right, leaves an extra char somewhere
 - copy/cut operations are broken currently
 - create some sort of 'screen' data structure that holds things like width, height, etc. etc?
 	- then we might be able to do things like split/load multiple docs
@@ -605,7 +605,7 @@ void insert_tab(cursor_pos* cursor)
 	int tab_target = TAB_DISTANCE - (cursor->xpos % TAB_DISTANCE);
 	if (cursor->xpos + tab_target < LINE_LENGTH)
 	{
-		for (size_t i = LINE_LENGTH; i > cursor->xpos + tab_target; --i)
+		for (size_t i = LINE_LENGTH; i >= cursor->xpos + tab_target; --i)
 		{
 			cursor->currline->line[i] = cursor->currline->line[i - tab_target];
 		}
