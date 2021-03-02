@@ -22,12 +22,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 /*
-*TODO:*
-- Fix warning at 766!
-comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->width + cursor->xpos - 1 >= 0))
-- but cursor->width should be signed? it is just an int? hmmm.
-
-- switch from using est_number_lines to document.number_of_lines everywhere!
 - copy/cut operations are broken currently
 - create some sort of 'screen' data structure that holds things like width, height, etc. etc?
 	- then we might be able to do things like split/load multiple docs
@@ -63,6 +57,7 @@ comparison of unsigned expression in ‘>= 0’ is always true (if (cursor->widt
 
 static void initialize_terminal();
 static void initialize_colors();
+static void initialize_display(display*);
 static bool check_for_version_flag(int argc, char** argv);
 static void parse_args(int argc, char* argv[], char ** filename);
 static bool get_string(char* prompt, char* start, char* response, size_t max_size);
@@ -98,23 +93,21 @@ static void insert_character(cursor_pos* cursor, char ch);
 static void extend_cursor_left(cursor_pos* cursor);
 static void extend_cursor_right(cursor_pos* cursor);
 
-
-// GLOBALS: TODO: Get these outta here!
-size_t width, height;
-// should this be in the doc struct
-size_t absy = 0;			// absolute-y position in document
-
 char fname[MAX_FILE_NAME];
 char* current_filename = NULL;
 char* to_load = NULL;
 
 // for now, only allow a SINGLE doc to be loaded, that
-// we'll name (imaginatively) document
+// we'll name (imaginatively) document, and a single
+// display window named d. Eventually, we could allow 
+// split windows, and have multiple ds, eah with their own
+// doc?
 doc* main_document;
+display* d;
 
 // cutline and copyline should just be a TEXT buffer, since we DON'T
 // want to keep track of the old lines prev and next lines, we'll make 
-// new versions of those once we past.
+// new versions of those once we paste.
 // copy line and cut line are features of the current context
 docline* copy_line = NULL;
 docline* cut_line = NULL;
@@ -127,12 +120,6 @@ bool syntax_highlighting = true;
 bool show_help = false;
 bool show_version = false;
 
-// top line to display for scrolling
-// these will be parts of the context
-docline* topline;
-size_t toplineno = 1;
-size_t leftmostdigitno = 0;
-
 // cursors
 cursor_pos cursors[MAX_CURSORS] = {0};
 int num_cursors = 1;
@@ -142,9 +129,6 @@ int debug_countdown = 0;
 
 bool had_input = false;
 bool exitFlag = false;
-
-time_t rawtime;
-struct tm * timeinfo;
 
 int main(int argc, char** argv)
 {
@@ -156,6 +140,7 @@ int main(int argc, char** argv)
 
 	initialize_terminal();
 
+
 	if (!has_colors())
 	{
 		printw("No color terminal found, exiting.");
@@ -164,6 +149,9 @@ int main(int argc, char** argv)
 		cleanup_and_end();
 	}
 	initialize_colors();
+
+	d = calloc(1, sizeof(display));
+	initialize_display(d);
 
 	wchar_t ch;
 	double avg_cpu_mhz = 0.0;
@@ -195,8 +183,6 @@ int main(int argc, char** argv)
 	mvchgat(0, 0, -1, 0, BAR_PAIR, NULL);
 	refresh();
 
-	getmaxyx(stdscr, height, width);
-
 	// Start our timer clock
 	clock_t now = clock();
 	main_document = calloc(1, sizeof(doc));
@@ -214,7 +200,7 @@ int main(int argc, char** argv)
 	}
 
 	// set topline here in case we loaded a file above
-	topline = main_document->head;
+	d->topline = main_document->head;
 
 	draw_lines(main_document->head);
 	draw_cursors();
@@ -253,6 +239,7 @@ int main(int argc, char** argv)
 		{
 			check_unsaved_changes();
 			clear_doc(main_document);
+			initialize_display(d);
 			initialize_doc();
 			break;
 		}
@@ -334,9 +321,10 @@ int main(int argc, char** argv)
 			break;
 
 		case CTRL('u'): // remove extra carats
+		{
 			num_cursors = 1;
 			break;
-
+		}
 
 
 		case KEY_SLEFT:
@@ -372,7 +360,7 @@ int main(int argc, char** argv)
 
 		case KEY_RESIZE:
 		{
-			getmaxyx(stdscr, height, width);
+			getmaxyx(stdscr, d->height, d->width);
 			break;
 		}
 
@@ -480,7 +468,7 @@ int main(int argc, char** argv)
 			}
 
 			clear();
-			draw_lines(topline);
+			draw_lines(d->topline);
 			draw_cursors();
 
 			if (had_input)	// just so we can show the title bar until a key is pressed? find a better way.
@@ -489,27 +477,27 @@ int main(int argc, char** argv)
 					changes = 'U';
 				else
 					changes = ' ';
-				mvprintw(0 , 0, "%d, %d %c ", (cursors[0].xpos + 1), (absy + 1), changes);
-				mvprintw(0, width - 6, "%02d, %02d", height, width);
+				mvprintw(0 , 0, "%d, %d %c ", (cursors[0].xpos + 1), (d->absy + 1), changes);
+				mvprintw(0, d->width - 6, "%02d, %02d", d->height, d->width);
 
 				if (current_filename)
-					mvprintw(0, (width - strlen(current_filename) - 6) / 2, "mipsze - %s", current_filename);
+					mvprintw(0, (d->width - strlen(current_filename) - 6) / 2, "mipsze - %s", current_filename);
 				else
-					mvprintw(0, (width - 5) / 2, "mipsze");
+					mvprintw(0, (d->width - 5) / 2, "mipsze");
 				mvchgat(0, 0, -1, A_BOLD, BAR_PAIR, NULL);
 			}
 		}
 
 		if (debug_countdown > 1)
 		{
-			mvprintw(height - 1, 0, "%s", debug_msg);
+			mvprintw(d->height - 1, 0, "%s", debug_msg);
 		}
 		else if (debug_countdown == 1)
 		{
 			clear_status_bar();
 		}
 
-		mvprintw(height - 1, width - 15, "cpu: %.2fGHz", avg_cpu_mhz);
+		mvprintw(d->height - 1, d->width - 15, "cpu: %.2fGHz", avg_cpu_mhz);
 
 		// screen update
 		if (clock() - now > 250000)
@@ -553,6 +541,14 @@ static void initialize_colors()
 	init_pair(ERROR_BLOCK_PAIR, -1, COLOR_RED);
 	init_pair(LINE_NO_PAIR, COLOR_WHITE, COLOR_BLACK);
 	init_pair(MACRO_PARAM_PAIR, COLOR_YELLOW, -1);
+}
+
+static void initialize_display(display* d)
+{
+	getmaxyx(stdscr, d->height, d->width);
+	d->top_line_number = 1;
+	d->left_char_number = 0;
+	d->absy = 0;
 }
 
 static void show_version_msg()
@@ -605,7 +601,7 @@ void insert_tab(cursor_pos* cursor)
 	int tab_target = TAB_DISTANCE - (cursor->xpos % TAB_DISTANCE);
 	if (cursor->xpos + tab_target < LINE_LENGTH)
 	{
-		for (size_t i = LINE_LENGTH; i > cursor->xpos + tab_target; --i)
+		for (size_t i = LINE_LENGTH; i >= cursor->xpos + tab_target; --i)
 		{
 			cursor->currline->line[i] = cursor->currline->line[i - tab_target];
 		}
@@ -649,8 +645,8 @@ void insert_newline(cursor_pos* cursor)
 		// insert before
 		if (main_document->head == cursor->currline)
 		{
-			if (topline == main_document->head)	// hmm, having to do this is obnoxious?
-				topline = newline;
+			if (d->topline == main_document->head)	// hmm, having to do this is obnoxious?
+				d->topline = newline;
 			main_document->head = newline;
 		}
 		newline->prevline = cursor->currline->prevline;
@@ -684,17 +680,17 @@ void insert_newline(cursor_pos* cursor)
 
 finish_scroll_down:
 	// todo: scroll if we're at bottom of the screen!
-	if (cursor->ypos != height - 3)
+	if (cursor->ypos != d->height - 3)
 	{
 		++cursor->ypos;
-		++absy;
+		++d->absy;
 	}
 	else
 	{
-			topline = topline->nextline;
+			d->topline = d->topline->nextline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			++absy;
-			++toplineno;
+			++d->absy;
+			++d->top_line_number;
 	}
 	main_document->unsaved_changes = true;
 	++main_document->number_of_lines;
@@ -722,7 +718,7 @@ void remove_char(cursor_pos* cursor)
 		{
 			tmp = cursor->currline->prevline;
 			--cursor->ypos;
-			--absy;
+			--d->absy;
 		}
 		else
 		{
@@ -756,23 +752,23 @@ void remove_char(cursor_pos* cursor)
 
 void cursor_left(cursor_pos* cursor)
 {
-	if (cursor->xpos == 0 && leftmostdigitno > 0)
+	if (cursor->xpos == 0 && d->left_char_number > 0)
 	{
-		--leftmostdigitno;
+		--d->left_char_number;
 	}
-	else if (cursor->xpos == 0 && cursor->currline->prevline && leftmostdigitno == 0)
+	else if (cursor->xpos == 0 && cursor->currline->prevline && d->left_char_number == 0)
 	{
 		cursor->currline = cursor->currline->prevline;
 		if (cursor->ypos != 0)
 		{
 			--cursor->ypos;
-			--absy;
+			--d->absy;
 		}
 		else
 		{
-			topline = topline->prevline;
-			--toplineno;
-			--absy;
+			d->topline = d->topline->prevline;
+			--d->top_line_number;
+			--d->absy;
 		}
 		cursor->xpos = strlen(cursor->currline->line);
 	}
@@ -787,10 +783,10 @@ void cursor_right(cursor_pos* cursor)
 	// consider line numbers being used here
 	// -4 seems icky and arbitrary, fix this with a notion of "screen" struct
 	// that can track this stuff?
-	size_t scrolling_width = show_line_no ? width - leading_zeros - 4 : width;
+	size_t scrolling_width = show_line_no ? d->width - leading_zeros - 4 : d->width;
 	if (cursor->xpos == scrolling_width && cursor->xpos <= strlen(cursor->currline->line))
 	{
-		++leftmostdigitno;
+		++d->left_char_number;
 	}
 	else if (cursor->xpos <= strlen(cursor->currline->line))
 	{
@@ -800,11 +796,11 @@ void cursor_right(cursor_pos* cursor)
 	{
 		cursor->currline = cursor->currline->nextline;
 		++cursor->ypos;
-		++absy;
+		++d->absy;
 		cursor->xpos = 0;
 	}
-	if (leftmostdigitno > LINE_LENGTH - width)
-		leftmostdigitno = LINE_LENGTH - width;
+	if (d->left_char_number > LINE_LENGTH - d->width)
+		d->left_char_number = LINE_LENGTH - d->width;
 }
 
 void extend_cursor_right(cursor_pos* cursor)
@@ -819,7 +815,7 @@ void extend_cursor_right(cursor_pos* cursor)
 
 void extend_cursor_left(cursor_pos* cursor)
 {
-	if (cursor->width + cursor->xpos - 1 >= 0)
+	if (cursor->width + (int)cursor->xpos - 1 >= 0)
 	{
 		--cursor->width;
 	}
@@ -829,15 +825,15 @@ void extend_cursor_left(cursor_pos* cursor)
 
 void cursor_down(cursor_pos* cursor)
 {
-	if (cursor->ypos == height - 3)
+	if (cursor->ypos == d->height - 3)
 	{
 		if (cursor->currline->nextline)
 		{
-			topline = topline->nextline;
+			d->topline = d->topline->nextline;
 			cursor->currline = cursor->currline->nextline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			++absy;
-			++toplineno;
+			++d->absy;
+			++d->top_line_number;
 		}
 	}
 	else if (cursor->currline->nextline)
@@ -845,7 +841,7 @@ void cursor_down(cursor_pos* cursor)
 		cursor->currline = cursor->currline->nextline;
 		cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
 		++cursor->ypos;
-		++absy;
+		++d->absy;
 	}
 }
 
@@ -855,11 +851,11 @@ void cursor_up(cursor_pos* cursor)
 	{
 		if (cursor->currline->prevline)
 		{
-			topline = topline->prevline;
+			d->topline = d->topline->prevline;
 			cursor->currline = cursor->currline->prevline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			--toplineno;
-			--absy;
+			--d->top_line_number;
+			--d->absy;
 		}
 	}
 	else if (cursor->currline->prevline)
@@ -868,7 +864,7 @@ void cursor_up(cursor_pos* cursor)
 		cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
 		if (cursor->ypos > 0)
 			--cursor->ypos;
-		--absy;
+		--d->absy;
 	}
 }
 
@@ -879,7 +875,7 @@ void set_debug_msg(const char* msg, ...)
 	vsprintf(debug_msg, msg, args);
 	va_end (args);
 	debug_countdown = DISPLAY_DEBUG_TIME;
-	mvprintw(height - 1, 0, "%s", debug_msg);
+	mvprintw(d->height - 1, 0, "%s", debug_msg);
 	refresh();
 }
 
@@ -903,7 +899,7 @@ void remove_line(docline* line, docline** head, docline** tail)
 // this should take a document
 void draw_lines(docline* top)
 {
-	int max_lines = height - 1;
+	int max_lines = d->height - 1;
 	docline* cur = top;
 	int yline = 1;
 	char ch;
@@ -919,12 +915,12 @@ void draw_lines(docline* top)
 		if (show_line_no)
 		{
 			attron(COLOR_PAIR(LINE_NO_PAIR));
-			mvprintw(yline, 0, "%*lu: ", (leading_zeros + 1), toplineno + yline - 1);
+			mvprintw(yline, 0, "%*lu: ", (leading_zeros + 1), d->top_line_number + yline - 1);
 			attroff(COLOR_PAIR(LINE_NO_PAIR));
 		}
 		for (size_t x = 0; x < strlen(cur->line); ++x)
 		{
-			ch = cur->line[x + leftmostdigitno];
+			ch = cur->line[x + d->left_char_number];
 			if (syntax_highlighting)
 			{
 				if (!first)
@@ -932,7 +928,7 @@ void draw_lines(docline* top)
 					attroff(clrval);
 				}
 				first = false;
-				clrval = cur->formatting[x + leftmostdigitno];
+				clrval = cur->formatting[x + d->left_char_number];
 				attron(clrval);
 			}
 			if (show_line_no)
@@ -1006,12 +1002,10 @@ void load_document()
 	cursors[0].ypos = 0;
 	num_cursors = 1;
 
-	topline = main_document->head;
+	d->topline = main_document->head;
 	main_document->unsaved_changes = false;
 
-	toplineno = 1;
-	leftmostdigitno = 0;
-	absy = 0;
+	initialize_display(d);
 
 	find_labels(main_document->head);
 	set_leading_zeros();
@@ -1062,7 +1056,7 @@ static bool get_string(char* prompt, char* start, char* response, size_t max_siz
 	{
 		if (display)
 		{
-			move(height - 1, strlen(prompt) + 2);
+			move(d->height - 1, strlen(prompt) + 2);
 			clrtoeol();
 			printw("%s_", resp);
 			display = false;
@@ -1123,7 +1117,7 @@ static void initialize_doc()
 	main_document->tail = firstline;
 
 	cursors[0].currline = main_document->head;
-	topline = main_document->head;
+	d->topline = main_document->head;
 	cursors[0].xpos = 0;
 	cursors[0].ypos = 0;
 	cursors[0].width = 1;
@@ -1135,10 +1129,6 @@ static void initialize_doc()
 	main_document->number_of_lines = 0;
 	main_document->number_of_chars = 0;
 	main_document->unsaved_changes = false;
-
-	toplineno = 1;
-	leftmostdigitno = 0;
-	absy = 0;
 
 	set_leading_zeros();
 }
@@ -1235,6 +1225,6 @@ static bool check_for_version_flag(int argc, char* argv[])
 
 static inline void clear_status_bar()
 {
-	move(height - 1, 0);
+	move(d->height - 1, 0);
 	clrtoeol();	
 }
