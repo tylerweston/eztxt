@@ -33,8 +33,6 @@
 	__typeof__ (b) _b = (b);     \
 	_a < _b ? _a : _b; }          )
 
- // #define min(X,Y) ((X) < (Y) ? : (X) : (Y))
-
 typedef struct docline 
 {
 	char line[LINE_LENGTH];				// text content of a line
@@ -42,6 +40,16 @@ typedef struct docline
 	struct docline* prevline;
 	struct docline* nextline;
 } docline;
+
+typedef struct display
+{
+	size_t width;
+	size_t height;
+	docline* topline;
+	size_t top_line_number;
+	size_t left_char_number;
+	size_t absy;
+} display;
 
 typedef struct cursor_pos
 {
