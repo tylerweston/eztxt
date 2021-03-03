@@ -23,11 +23,9 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /*
 - copy/cut operations are broken currently
-- create some sort of 'screen' data structure that holds things like width, height, etc. etc?
-	- then we might be able to do things like split/load multiple docs
 - multicarat over a spot that alreay has a carat shouldn't add a new one!
 	- we'll need to "compress" the carats here? or maybe have an "active" flag or something?
-- problem with byobu terminal and width of line number printing
+- don't allow multicarats to spill over lines!
 - move the OTHER carat when multi-carating (The WIDE line should stay where it was!)
 - moving topline up/down always does the same two things
 	let's roll them into one function
@@ -60,7 +58,7 @@ static void initialize_colors();
 static void initialize_display(display*);
 static bool check_for_version_flag(int argc, char** argv);
 static void parse_args(int argc, char* argv[], char ** filename);
-static bool get_string(char* prompt, char* start, char* response, size_t max_size);
+static bool get_string(char* prompt, char* default_text, char* response, size_t max_size);
 static void set_leading_zeros();
 static void cleanup_and_end();
 static void show_version_msg();
@@ -71,6 +69,9 @@ static void check_unsaved_changes();
 static void load_document();
 static void save_document();
 static void initialize_doc();
+
+static void scroll_document_down();	// hmmm... take a doc? display?
+static void scroll_document_up();
 
 // line editing
 static void draw_lines(docline*);
@@ -689,14 +690,32 @@ finish_scroll_down:
 	}
 	else
 	{
-			d->topline = d->topline->nextline;
-			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			++d->absy;
-			++d->top_line_number;
+		cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
+		scroll_document_down();
 	}
 	main_document->unsaved_changes = true;
 	++main_document->number_of_lines;
 	set_leading_zeros();
+}
+
+static void scroll_document_up()
+{
+	if (d->topline->prevline == NULL)
+		return;	// this should be an error!
+	d->topline = d->topline->prevline;
+	--d->absy;
+	--d->top_line_number;
+}
+
+static void scroll_document_down()
+{
+	// todo: we'll need to move all cursors up?
+	// todo: we might have cursors that aren't visible?
+	if (d->topline->nextline == NULL)
+		return;	// this should be an error!
+	d->topline = d->topline->nextline;
+	++d->absy;
+	++d->top_line_number;
 }
 
 void remove_char(cursor_pos* cursor)
@@ -768,9 +787,7 @@ void cursor_left(cursor_pos* cursor)
 		}
 		else
 		{
-			d->topline = d->topline->prevline;
-			--d->top_line_number;
-			--d->absy;
+			scroll_document_up();
 		}
 		cursor->xpos = strlen(cursor->currline->line);
 	}
@@ -793,6 +810,13 @@ void cursor_right(cursor_pos* cursor)
 	else if (cursor->xpos <= strlen(cursor->currline->line))
 	{
 		cursor->xpos++;
+	}
+	else if (cursor->xpos > strlen(cursor->currline->line) &&
+		cursor->currline->nextline && cursor->ypos == d->height - 3)
+	{
+		cursor->currline = cursor->currline->nextline;
+		scroll_document_down();
+		cursor->xpos = 0;
 	}
 	else if (cursor->xpos > strlen(cursor->currline->line) && cursor->currline->nextline)
 	{
@@ -831,11 +855,9 @@ void cursor_down(cursor_pos* cursor)
 	{
 		if (cursor->currline->nextline)
 		{
-			d->topline = d->topline->nextline;
 			cursor->currline = cursor->currline->nextline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			++d->absy;
-			++d->top_line_number;
+			scroll_document_down();
 		}
 	}
 	else if (cursor->currline->nextline)
@@ -853,11 +875,9 @@ void cursor_up(cursor_pos* cursor)
 	{
 		if (cursor->currline->prevline)
 		{
-			d->topline = d->topline->prevline;
 			cursor->currline = cursor->currline->prevline;
 			cursor->xpos = min(cursor->xpos, strlen(cursor->currline->line));
-			--d->top_line_number;
-			--d->absy;
+			scroll_document_up();
 		}
 	}
 	else if (cursor->currline->prevline)
@@ -1028,7 +1048,7 @@ void wait_for_keypress()
 }
 
 // todo: move out of here?
-static bool get_string(char* prompt, char* start, char* response, size_t max_size)
+static bool get_string(char* prompt, char* default_text, char* response, size_t max_size)
 {
 	// display prompt, with default text, and store reponse
 	// in response. return false is user presses escape, ie. no input
@@ -1044,10 +1064,10 @@ static bool get_string(char* prompt, char* start, char* response, size_t max_siz
 	clear_status_bar();
 	printw("%s: ", prompt);
 	
-	if (start)
+	if (default_text)
 	{
-		strcpy(resp, start);
-		resp_index = strlen(start);
+		strcpy(resp, default_text);
+		resp_index = strlen(default_text);
 	}
 	else
 	{

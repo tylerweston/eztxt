@@ -1,3 +1,6 @@
+#ifndef MIPSZE_HEAD
+#define MIPSZE_HEAD
+
 #include <curses.h>	// include stdio
 #include <stdlib.h>
 #include <wchar.h>
@@ -57,7 +60,6 @@ typedef struct cursor_pos
 	size_t ypos;
 	signed int width;
 	docline* currline;
-	// todo: each cursor will keep track of it's own current line!
 } cursor_pos;
 
 typedef struct doc 
@@ -68,7 +70,6 @@ typedef struct doc
 	size_t number_of_chars;
 	bool unsaved_changes;
 } doc;
-
 
 
 #define CUR_PAIR 1
@@ -88,4 +89,6 @@ typedef struct doc
 
 // allow other function to set debug messages
 void set_debug_msg(const char* msg, ...);
-void wait_for_keypress();;
+void wait_for_keypress();
+
+#endif
