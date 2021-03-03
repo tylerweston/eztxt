@@ -14,11 +14,6 @@
 #define MAX_MACRO_LENGTH 36
 #define MAX_MACROS 100
 
-// TODO:
-// - hex coloring
-// - character literals
-
-
 // for storing macro names
 char seen_macros[MAX_MACROS][MAX_MACRO_LENGTH] = {0};
 int macros_seen = 0;
@@ -27,7 +22,8 @@ int macros_seen = 0;
 char seen_labels[MAX_LABELS][MAX_LABEL_LENGTH] = {0};
 int labels_seen = 0;
 
-// alphabetize and use binary search?
+// note that kwords and pinstrs are alphabetized so that
+// we can use binary search to speed up token discovery
 char kwords[NUM_KEYWORDS][MAX_TOKEN_LENGTH] = {0};
 char pinstrs[NUM_PSEUDOINSTRUCTIONS][MAX_TOKEN_LENGTH] = {0};
 int num_kwords = 0, num_pinstrs = 0;
@@ -181,7 +177,7 @@ void parse_line(docline* line)
 			in_quotes = false;
 		}
 
-		// this are is single quotes
+		// this are single quotes
 		// todo, maybe check that we only have a single char in here
 		// othewise, signal an error?
 		// give double quotes priority so we can use single quotes

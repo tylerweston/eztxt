@@ -74,7 +74,7 @@ static void initialize_doc();
 
 // line editing
 static void draw_lines(docline*);
-static void remove_line(docline* line, docline** head, docline** tail);
+static void remove_line(doc* document, docline* line);
 static void clear_doc(doc* document);
 
 static void draw_cursors();
@@ -253,7 +253,7 @@ int main(int argc, char** argv)
 				copy_line = NULL;
 			cut_line = cursors[0].currline;
 			docline* tmp = cursors[0].currline->nextline;
-			remove_line(cursors[0].currline, &main_document->head, &main_document->tail);
+			remove_line(main_document, cursors[0].currline);
 			cursors[0].currline = tmp;
 			break;
 		}
@@ -429,6 +429,8 @@ int main(int argc, char** argv)
 		{
 			for (int i = 0; i < num_cursors; ++i)
 			{
+				if (cursors[i].xpos == 0 && cursors[i].currline->prevline == NULL)
+					continue;	// only time backspace isn't allowed!
 				cursor_left(&cursors[i]);
 				remove_char(&cursors[i]);
 			}
@@ -466,7 +468,7 @@ int main(int argc, char** argv)
 				clear_labels();
 				find_labels(main_document->head);
 			}
-
+			// TODO: Do we need to clear the entire screen?
 			clear();
 			draw_lines(d->topline);
 			draw_cursors();
@@ -724,7 +726,7 @@ void remove_char(cursor_pos* cursor)
 		{
 			tmp = cursor->currline->nextline;
 		}
-		remove_line(cursor->currline, &main_document->head, &main_document->tail);
+		remove_line(main_document, cursor->currline);
 		cursor->currline = tmp;
 	}
 	else if (cursor->xpos == strlen(cursor->currline->line) && cursor->currline->nextline != NULL)
@@ -737,7 +739,7 @@ void remove_char(cursor_pos* cursor)
 			cursor->currline->line[lineindex++] = cursor->currline->nextline->line[i];
 			if (lineindex >= 80) lineindex = 80;
 		}
-		remove_line(cursor->currline->nextline, &main_document->head, &main_document->tail);
+		remove_line(main_document, cursor->currline->nextline);
 	}
 	else
 	{
@@ -880,16 +882,16 @@ void set_debug_msg(const char* msg, ...)
 }
 
 // this should take a docline to delete and the document it's from
-void remove_line(docline* line, docline** head, docline** tail)
+void remove_line(doc* document, docline* line)
 {
-	if (*head == *tail && *head == line)
+	if (document->head == document->tail && document->head == line)
 		return;
-	--main_document->number_of_lines;
+	--document->number_of_lines;
 	set_leading_zeros();
-	if (*head == line)
-		*head = line->nextline;
-	if (*tail == line)
-		*tail = line->prevline;
+	if (document->head == line)
+		document->head = line->nextline;
+	if (document->tail == line)
+		document->tail = line->prevline;
 	if (line->nextline != NULL)
 		line->nextline->prevline = line->prevline;
 	if (line->prevline != NULL)
@@ -907,7 +909,7 @@ void draw_lines(docline* top)
 	{
 		move(yline, 0);
 		clrtoeol();
-		int clrval = 0;
+		int attr_val = 0;
 		if (syntax_highlighting)
 			parse_line(cur);
 		bool first = true;
@@ -925,11 +927,11 @@ void draw_lines(docline* top)
 			{
 				if (!first)
 				{
-					attroff(clrval);
+					attroff(attr_val);
 				}
 				first = false;
-				clrval = cur->formatting[x + d->left_char_number];
-				attron(clrval);
+				attr_val = cur->formatting[x + d->left_char_number];
+				attron(attr_val);
 			}
 			if (show_line_no)
 				absx = x + leading_zeros + 3;
@@ -938,8 +940,8 @@ void draw_lines(docline* top)
 			mvprintw(yline, absx, "%c", ch);
 		}
 		if (syntax_highlighting)
-			attroff(clrval);
-		yline++;
+			attroff(attr_val);
+		++yline;
 		cur = cur->nextline;
 	} while (cur != NULL && yline < max_lines);
 	refresh();
